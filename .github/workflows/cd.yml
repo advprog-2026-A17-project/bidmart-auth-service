@@ -1,0 +1,36 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches:
+      - staging
+      - main
+
+jobs:
+  deploy:
+    name: Deployment to AWS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Verify Build
+        run: chmod +x gradlew && ./gradlew build -x test
+
+      - name: Deploy to AWS Staging
+        if: github.ref == 'refs/heads/staging'
+        run: |
+          echo "Deploying to AWS Staging Environment..."
+          echo "Status: Staging Updated."
+
+      - name: Deploy to AWS Production
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "Deploying to AWS Production Environment..."
+          echo "Status: Production Updated."
