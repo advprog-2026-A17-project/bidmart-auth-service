@@ -9,6 +9,8 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import java.util.UUID;
+
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -34,8 +36,11 @@ class AuthControllerTest {
         user.setRole("BUYER");
         user.setEnabled(true);
 
-        when(authService.register(org.mockito.ArgumentMatchers.any(User.class)))
-                .thenReturn(user);
+        when(authService.register(
+                anyString(),
+                anyString(),
+                anyString()
+        )).thenReturn(user);
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
