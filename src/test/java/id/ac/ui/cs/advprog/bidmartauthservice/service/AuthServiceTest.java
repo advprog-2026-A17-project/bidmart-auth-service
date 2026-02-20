@@ -23,19 +23,21 @@ class AuthServiceTest {
     @Test
     void testRegisterUser() {
         User user = new User();
-        user.setId(UUID.randomUUID().toString());
         user.setEmail("service@test.com");
         user.setPassword("pass");
         user.setRole("BUYER");
-        user.setEnabled(true);
 
         when(userRepository.save(any(User.class))).thenReturn(user);
 
-        User saved = authService.register(user);
+        User saved = authService.register(
+                user.getEmail(),
+                user.getPassword(),
+                user.getRole()
+        );
 
         assertNotNull(saved);
         assertEquals("service@test.com", saved.getEmail());
-        verify(userRepository, times(1)).save(user);
+        verify(userRepository, times(1)).save(any(User.class));
     }
 
     @Test
