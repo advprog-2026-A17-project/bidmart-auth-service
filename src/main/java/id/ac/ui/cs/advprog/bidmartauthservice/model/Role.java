@@ -1,15 +1,7 @@
 package id.ac.ui.cs.advprog.bidmartauthservice.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-import jakarta.persistence.Column;
-
-import lombok.Getter;
-import lombok.Setter;
-import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
+import jakarta.persistence.*;
+import lombok.*;
 
 import java.util.UUID;
 
@@ -25,7 +17,6 @@ public class Role {
     @Id
     private UUID id;
 
-    @Column(nullable = false, unique = true)
+    @Column(unique = true, nullable = false)
     private String name;
-
 }
