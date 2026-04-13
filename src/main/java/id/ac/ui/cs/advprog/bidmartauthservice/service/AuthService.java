@@ -61,4 +61,22 @@ public class AuthService {
     public Optional<User> findByEmail(String email) {
         return userRepository.findByEmail(email);
     }
+
+    public Optional<User> getProfileByEmail(String email) {
+        return userRepository.findByEmail(email);
+    }
+
+    public Optional<User> updateProfile(
+            String email,
+            String displayName,
+            String avatarUrl,
+            String shippingAddress
+    ) {
+        return userRepository.findByEmail(email).map(user -> {
+            user.setDisplayName(displayName);
+            user.setAvatarUrl(avatarUrl);
+            user.setShippingAddress(shippingAddress);
+            return userRepository.save(user);
+        });
+    }
 }
