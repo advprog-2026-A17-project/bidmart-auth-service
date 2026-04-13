@@ -23,9 +23,12 @@ jobs:
       - name: Verify Build
         run: chmod +x gradlew && ./gradlew build -x test
 
+      - name: Install Heroku CLI
+        run: curl https://cli-assets.heroku.com/install.sh | sh
+
       - name: Deploy to Heroku
         uses: akhileshns/heroku-deploy@v3.13.15
         with:
           heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
-          heroku_app_name: bidmart-auction-service
+          heroku_app_name: bidmart-authentication-service
           heroku_email: ${{ secrets.HEROKU_EMAIL }}
