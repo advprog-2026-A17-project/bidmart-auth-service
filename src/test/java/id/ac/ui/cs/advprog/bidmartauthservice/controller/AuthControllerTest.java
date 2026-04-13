@@ -2,9 +2,12 @@ package id.ac.ui.cs.advprog.bidmartauthservice.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.LoginRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.RefreshTokenRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.AuthService;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -32,6 +35,9 @@ class AuthControllerTest {
 
     @MockBean
     private AuthService authService;
+
+    @MockBean
+    private TokenService tokenService;
 
         @Autowired
         private ObjectMapper objectMapper;
@@ -81,6 +87,13 @@ class AuthControllerTest {
 
         when(authService.login("buyer@test.com", "pass"))
                 .thenReturn(Optional.of(user));
+        when(tokenService.issueTokens(user)).thenReturn(new TokenResponse(
+                "access-token",
+                "refresh-token",
+                "Bearer",
+                900,
+                null
+        ));
 
         LoginRequest request = new LoginRequest("buyer@test.com", "pass");
 
@@ -88,8 +101,11 @@ class AuthControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.email").value("buyer@test.com"))
-                .andExpect(jsonPath("$.password").doesNotExist());
+                .andExpect(jsonPath("$.accessToken").value("access-token"))
+                .andExpect(jsonPath("$.refreshToken").value("refresh-token"))
+                .andExpect(jsonPath("$.tokenType").value("Bearer"))
+                .andExpect(jsonPath("$.expiresIn").value(900))
+                .andExpect(jsonPath("$.user.password").doesNotExist());
     }
 
     @Test
@@ -104,6 +120,36 @@ class AuthControllerTest {
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().string("Invalid credentials"));
+    }
+
+    @Test
+    void refreshShouldReturnRotatedTokensWhenRefreshTokenValid() throws Exception {
+        when(tokenService.refreshTokens("refresh-token")).thenReturn(new TokenResponse(
+                "new-access-token",
+                "new-refresh-token",
+                "Bearer",
+                900,
+                null
+        ));
+
+        RefreshTokenRequest request = new RefreshTokenRequest("refresh-token");
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").value("new-access-token"))
+                .andExpect(jsonPath("$.refreshToken").value("new-refresh-token"));
+    }
+
+    @Test
+    void logoutShouldRevokeRefreshTokenAndReturnNoContent() throws Exception {
+        RefreshTokenRequest request = new RefreshTokenRequest("refresh-token");
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
     }
 
     @Test
