@@ -144,4 +144,45 @@ class AuthServiceTest {
         assertTrue(result.isPresent());
         assertEquals(email, result.get().getEmail());
     }
+
+    @Test
+    void getProfileByEmailShouldReturnUserWhenExists() {
+        String email = "profile@test.com";
+        User user = User.builder().email(email).displayName("Profile User").build();
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+
+        Optional<User> result = authService.getProfileByEmail(email);
+
+        assertTrue(result.isPresent());
+        assertEquals("Profile User", result.get().getDisplayName());
+    }
+
+    @Test
+    void updateProfileShouldUpdateAndPersistFieldsWhenUserExists() {
+        String email = "profile@test.com";
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email(email)
+                .displayName("Old Name")
+                .avatarUrl("https://cdn.example.com/old-avatar.png")
+                .shippingAddress("Old Address")
+                .build();
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<User> updated = authService.updateProfile(
+                email,
+                "New Name",
+                "https://cdn.example.com/new-avatar.png",
+                "New Address"
+        );
+
+        assertTrue(updated.isPresent());
+        assertEquals("New Name", updated.get().getDisplayName());
+        assertEquals("https://cdn.example.com/new-avatar.png", updated.get().getAvatarUrl());
+        assertEquals("New Address", updated.get().getShippingAddress());
+        verify(userRepository).save(user);
+    }
 }
