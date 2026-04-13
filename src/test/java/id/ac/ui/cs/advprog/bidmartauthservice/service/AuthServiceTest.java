@@ -247,4 +247,25 @@ class AuthServiceTest {
         assertFalse(disabled.get().isEnabled());
         verify(userRepository).save(user);
     }
+
+    @Test
+    void oauthLoginShouldCreateVerifiedBuyerWhenEmailNotRegistered() {
+        String email = "oauth@test.com";
+        Role buyerRole = Role.builder()
+                .id(UUID.randomUUID())
+                .name("BUYER")
+                .build();
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.empty());
+        when(roleRepository.findByName("BUYER")).thenReturn(Optional.of(buyerRole));
+        when(passwordEncoder.encode(anyString())).thenReturn("encoded-oauth-secret");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User user = authService.oauthLogin("google", "google-user-1", email, "OAuth User");
+
+        assertEquals(email, user.getEmail());
+        assertTrue(user.isEmailVerified());
+        assertEquals("OAuth User", user.getDisplayName());
+        assertTrue(user.getRoles().contains(buyerRole));
+    }
 }
