@@ -17,6 +17,7 @@ class MigrationSchemaTest {
     void migrationsShouldCreateUsersBeforeRoleMappings() throws IOException {
         String v1 = Files.readString(Path.of("src/main/resources/db/migration/V1__initial_user_schema.sql"));
         String v2 = Files.readString(Path.of("src/main/resources/db/migration/V2__identity_management_schema.sql"));
+        String v9 = Files.readString(Path.of("src/main/resources/db/migration/V9__seed_default_roles.sql"));
 
         assertTrue(v1.toLowerCase().contains("create table users"),
                 "V1 should define users table");
@@ -28,5 +29,7 @@ class MigrationSchemaTest {
                 "V1 should not contain legacy role column on users table");
         assertFalse(v2.toLowerCase().contains(" role varchar"),
                 "V2 should not contain legacy role column on users table");
+        assertTrue(v9.contains("BUYER"), "V9 should seed BUYER role");
+        assertTrue(v9.contains("SELLER"), "V9 should seed SELLER role");
     }
 }
