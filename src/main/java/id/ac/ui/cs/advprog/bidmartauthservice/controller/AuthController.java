@@ -3,6 +3,7 @@ package id.ac.ui.cs.advprog.bidmartauthservice.controller;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.LoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.AuthUserResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.OAuthLoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RefreshTokenRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
@@ -119,5 +120,16 @@ public class AuthController {
             tokenService.revokeAllSessionsForUser(user.getId());
             return ResponseEntity.noContent().<Void>build();
         }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/oauth/login")
+    public ResponseEntity<?> oauthLogin(@Valid @RequestBody OAuthLoginRequest request) {
+        User user = authService.oauthLogin(
+                request.provider(),
+                request.providerUserId(),
+                request.email(),
+                request.displayName()
+        );
+        return ResponseEntity.ok(tokenService.issueTokens(user));
     }
 }
