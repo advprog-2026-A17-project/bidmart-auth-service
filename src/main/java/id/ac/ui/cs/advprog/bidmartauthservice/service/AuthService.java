@@ -6,6 +6,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -58,9 +59,10 @@ public class AuthService {
         Optional<User> userOpt = userRepository.findByEmail(email);
 
         if (userOpt.isPresent() &&
-                userOpt.get().isEmailVerified() &&
                 passwordEncoder.matches(password, userOpt.get().getPassword())) {
-
+            if (!userOpt.get().isEmailVerified()) {
+                throw new EmailNotVerifiedException("Email not verified");
+            }
             return userOpt;
         }
 

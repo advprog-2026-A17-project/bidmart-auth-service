@@ -11,6 +11,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.OAuthLoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
@@ -128,6 +129,20 @@ class AuthControllerTest {
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().string("Invalid credentials"));
+    }
+
+    @Test
+    void loginShouldReturnForbiddenWhenEmailNotVerified() throws Exception {
+        when(authService.login("buyer@test.com", "pass"))
+                .thenThrow(new EmailNotVerifiedException("Email not verified"));
+
+        LoginRequest request = new LoginRequest("buyer@test.com", "pass");
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Email not verified"));
     }
 
     @Test
