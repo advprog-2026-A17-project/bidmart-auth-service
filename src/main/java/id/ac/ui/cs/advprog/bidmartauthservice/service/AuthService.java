@@ -108,4 +108,11 @@ public class AuthService {
                     userRepository.save(user);
                 });
     }
+
+    public Optional<User> disableUser(String email) {
+        return userRepository.findByEmail(email).map(user -> {
+            user.setEnabled(false);
+            return userRepository.save(user);
+        });
+    }
 }

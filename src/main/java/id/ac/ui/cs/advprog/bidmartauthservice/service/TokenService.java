@@ -1,11 +1,13 @@
 package id.ac.ui.cs.advprog.bidmartauthservice.service;
 
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.AuthUserResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.SessionResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidRefreshTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.RefreshToken;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -16,6 +18,7 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -30,6 +33,7 @@ public class TokenService {
     private static final String JWT_SECRET = "bidmart-auth-secret-key-bidmart-auth-secret-key";
 
     private final RefreshTokenRepository refreshTokenRepository;
+    private final UserRepository userRepository;
 
     public TokenResponse issueTokens(User user) {
         String accessToken = generateAccessToken(user);
@@ -103,6 +107,29 @@ public class TokenService {
             });
         } catch (RuntimeException ignored) {
             // idempotent revoke behavior
+        }
+    }
+
+    public List<SessionResponse> listActiveSessions(String email) {
+        return userRepository.findByEmail(email)
+                .map(user -> refreshTokenRepository.findByUserIdAndRevokedFalse(user.getId()).stream()
+                        .map(SessionResponse::fromRefreshToken)
+                        .toList())
+                .orElse(List.of());
+    }
+
+    public void revokeSessionByTokenId(UUID tokenId) {
+        refreshTokenRepository.findByTokenIdAndRevokedFalse(tokenId).ifPresent(token -> {
+            token.setRevoked(true);
+            refreshTokenRepository.save(token);
+        });
+    }
+
+    public void revokeAllSessionsForUser(UUID userId) {
+        List<RefreshToken> activeSessions = refreshTokenRepository.findByUserIdAndRevokedFalse(userId);
+        for (RefreshToken session : activeSessions) {
+            session.setRevoked(true);
+            refreshTokenRepository.save(session);
         }
     }
 
