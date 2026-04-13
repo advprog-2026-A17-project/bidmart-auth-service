@@ -229,4 +229,22 @@ class AuthServiceTest {
         assertNull(user.getVerificationToken());
         assertNull(user.getVerificationTokenExpiresAt());
     }
+
+    @Test
+    void disableUserShouldDisableAccountWhenEmailExists() {
+        String email = "disable@test.com";
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email(email)
+                .enabled(true)
+                .build();
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<User> disabled = authService.disableUser(email);
+
+        assertTrue(disabled.isPresent());
+        assertFalse(disabled.get().isEnabled());
+        verify(userRepository).save(user);
+    }
 }

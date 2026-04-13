@@ -5,6 +5,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.LoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RefreshTokenRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.SessionResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
@@ -23,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.List;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -300,7 +302,29 @@ class AuthControllerTest {
 
         mockMvc.perform(post("/api/v1/auth/resend-verification")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void getSessionsShouldReturnActiveSessionsForUser() throws Exception {
+        when(tokenService.listActiveSessions("buyer@test.com")).thenReturn(List.of(
+                new SessionResponse(UUID.randomUUID(), "buyer@test.com", false, "2099-01-01T00:00:00Z")
+        ));
+
+        mockMvc.perform(get("/api/v1/auth/sessions")
+                        .param("email", "buyer@test.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].email").value("buyer@test.com"))
+                .andExpect(jsonPath("$[0].revoked").value(false));
+    }
+
+    @Test
+    void disableUserShouldReturnNoContentWhenUserDisabled() throws Exception {
+        when(authService.disableUser("buyer@test.com")).thenReturn(Optional.of(new User()));
+
+        mockMvc.perform(post("/api/v1/auth/admin/disable-user")
+                        .param("email", "buyer@test.com"))
                 .andExpect(status().isNoContent());
     }
 }
