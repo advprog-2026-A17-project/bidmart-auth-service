@@ -61,7 +61,8 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("controller@test.com"))
                 .andExpect(jsonPath("$.roles[0].name").value("BUYER"))
-                .andExpect(jsonPath("$.enabled").value(true));
+                .andExpect(jsonPath("$.enabled").value(true))
+                .andExpect(jsonPath("$.password").doesNotExist());
     }
 
     @Test
@@ -87,7 +88,8 @@ class AuthControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.email").value("buyer@test.com"));
+                .andExpect(jsonPath("$.email").value("buyer@test.com"))
+                .andExpect(jsonPath("$.password").doesNotExist());
     }
 
     @Test
@@ -124,7 +126,8 @@ class AuthControllerTest {
         mockMvc.perform(get("/api/v1/auth/user")
                 .param("email", "buyer@test.com"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.email").value("buyer@test.com"));
+                .andExpect(jsonPath("$.email").value("buyer@test.com"))
+                .andExpect(jsonPath("$.password").doesNotExist());
     }
 
     @Test
@@ -135,5 +138,15 @@ class AuthControllerTest {
         mockMvc.perform(get("/api/v1/auth/user")
                 .param("email", "missing@test.com"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void registerShouldReturnBadRequestWhenEmailIsBlank() throws Exception {
+        RegisterRequest request = new RegisterRequest("", "pass", "BUYER");
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
     }
 }
