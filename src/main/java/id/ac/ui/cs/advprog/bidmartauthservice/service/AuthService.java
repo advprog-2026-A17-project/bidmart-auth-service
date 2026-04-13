@@ -5,8 +5,10 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Optional;
 import java.util.Set;
@@ -18,12 +20,13 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final PasswordEncoder passwordEncoder;
 
     public User register(String email, String password, String roleName) {
 
         // cek apakah email sudah ada
         if (userRepository.findByEmail(email).isPresent()) {
-            throw new RuntimeException("Email already registered");
+            throw new EmailAlreadyRegisteredException("Email already registered");
         }
 
         // cari role
@@ -34,7 +37,7 @@ public class AuthService {
         User user = User.builder()
                 .id(UUID.randomUUID())
                 .email(email)
-                .password(password)
+                .password(passwordEncoder.encode(password))
                 .enabled(true)
                 .roles(Set.of(role))
                 .build();
@@ -47,7 +50,7 @@ public class AuthService {
         Optional<User> userOpt = userRepository.findByEmail(email);
 
         if (userOpt.isPresent() &&
-                userOpt.get().getPassword().equals(password)) {
+                passwordEncoder.matches(password, userOpt.get().getPassword())) {
 
             return userOpt;
         }
