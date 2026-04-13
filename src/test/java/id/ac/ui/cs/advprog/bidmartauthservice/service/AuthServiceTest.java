@@ -5,6 +5,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Permission;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -141,7 +142,7 @@ class AuthServiceTest {
     }
 
     @Test
-    void loginShouldReturnEmptyWhenEmailNotVerified() {
+    void loginShouldThrowWhenEmailNotVerified() {
         String email = "find@test.com";
         String password = "secret";
 
@@ -151,10 +152,13 @@ class AuthServiceTest {
         user.setEmailVerified(false);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches(password, "encoded-secret")).thenReturn(true);
 
-        Optional<User> result = authService.login(email, password);
-
-        assertFalse(result.isPresent());
+        EmailNotVerifiedException exception = assertThrows(
+                EmailNotVerifiedException.class,
+                () -> authService.login(email, password)
+        );
+        assertEquals("Email not verified", exception.getMessage());
     }
 
     @Test
