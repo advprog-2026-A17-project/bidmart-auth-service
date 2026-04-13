@@ -3,6 +3,7 @@ package id.ac.ui.cs.advprog.bidmartauthservice.model;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 
@@ -24,7 +25,18 @@ public class User {
     @Column(nullable = false)
     private String password;
 
+    @Builder.Default
     private boolean enabled = true;
+
+    @Column(name = "email_verified", nullable = false)
+    @Builder.Default
+    private boolean emailVerified = false;
+
+    @Column(name = "verification_token", unique = true)
+    private String verificationToken;
+
+    @Column(name = "verification_token_expires_at")
+    private Instant verificationTokenExpiresAt;
 
     @Column(name = "display_name")
     private String displayName;
