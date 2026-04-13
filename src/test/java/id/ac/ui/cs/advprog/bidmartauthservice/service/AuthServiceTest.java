@@ -1,6 +1,8 @@
 package id.ac.ui.cs.advprog.bidmartauthservice.service;
 
+import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -10,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -21,6 +24,9 @@ class AuthServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private RoleRepository roleRepository;
+
     @InjectMocks
     private AuthService authService;
 
@@ -28,20 +34,29 @@ class AuthServiceTest {
     void registerShouldSaveEnabledUserWhenEmailIsAvailable() {
         String email = "service@test.com";
         String password = "pass";
-        String role = "BUYER";
+        String roleName = "BUYER";
+
+        Role role = Role.builder()
+            .id(UUID.randomUUID())
+            .name(roleName)
+            .build();
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.empty());
+        when(roleRepository.findByName(roleName)).thenReturn(Optional.of(role));
         when(userRepository.save(any(User.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        User saved = authService.register(email, password, role);
+        User saved = authService.register(email, password, roleName);
 
         assertNotNull(saved);
+        assertNotNull(saved.getId());
         assertEquals(email, saved.getEmail());
         assertEquals(password, saved.getPassword());
-        assertEquals(role, saved.getRole());
         assertTrue(saved.isEnabled());
+        assertNotNull(saved.getRoles());
+        assertTrue(saved.getRoles().contains(role));
         verify(userRepository).findByEmail(email);
+        verify(roleRepository).findByName(roleName);
         verify(userRepository).save(any(User.class));
     }
 
@@ -59,6 +74,7 @@ class AuthServiceTest {
 
         assertEquals("Email already registered", exception.getMessage());
         verify(userRepository).findByEmail(email);
+        verify(roleRepository, never()).findByName(anyString());
         verify(userRepository, never()).save(any(User.class));
     }
 

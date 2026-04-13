@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -21,11 +22,11 @@ class UserRepositoryTest {
     @Test
     void testSaveAndFindByEmail() {
         User user = new User();
-        user.setId(UUID.randomUUID().toString());
+        user.setId(UUID.randomUUID());
         user.setEmail("repo@test.com");
         user.setPassword("123");
-        user.setRole("BUYER");
         user.setEnabled(true);
+        user.setRoles(Set.of());
 
         userRepository.save(user);
 
