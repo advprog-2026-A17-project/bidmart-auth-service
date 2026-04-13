@@ -2,9 +2,9 @@ name: Continuous Integration
 
 on:
   pull_request:
-    branches: ["staging", "main"]
+    branches: ["cicd", "staging", "main"]
   push:
-    branches: ["staging", "main"]
+    branches: ["cicd", "staging", "main"]
 
 jobs:
   test:
@@ -20,10 +20,10 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Run Unit Tests & Jacoco
+      - name: Run Unit Tests & Coverage Check
         run: |
           chmod +x gradlew
-          ./gradlew test jacocoTestReport
+          ./gradlew clean check
 
   sonarcloud:
     name: SonarCloud Code Analysis
