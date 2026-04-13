@@ -132,4 +132,12 @@ public class AuthController {
         );
         return ResponseEntity.ok(tokenService.issueTokens(user));
     }
+
+    @GetMapping("/permissions/check")
+    public ResponseEntity<?> checkPermission(
+            @RequestParam String email,
+            @RequestParam String permission
+    ) {
+        return ResponseEntity.ok(java.util.Map.of("allowed", authService.hasPermission(email, permission)));
+    }
 }

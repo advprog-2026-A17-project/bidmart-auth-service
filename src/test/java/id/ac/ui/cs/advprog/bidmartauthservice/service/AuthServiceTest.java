@@ -2,6 +2,7 @@ package id.ac.ui.cs.advprog.bidmartauthservice.service;
 
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.Permission;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import org.junit.jupiter.api.Tag;
@@ -13,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -273,5 +275,28 @@ class AuthServiceTest {
         assertTrue(user.isEmailVerified());
         assertEquals("OAuth User", user.getDisplayName());
         assertTrue(user.getRoles().contains(buyerRole));
+    }
+
+    @Test
+    void hasPermissionShouldReturnTrueWhenUserRoleContainsPermission() {
+        Permission permission = Permission.builder()
+                .id(UUID.randomUUID())
+                .name("bid:place")
+                .build();
+        Role buyerRole = Role.builder()
+                .id(UUID.randomUUID())
+                .name("BUYER")
+                .permissions(Set.of(permission))
+                .build();
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("rbac@test.com")
+                .roles(Set.of(buyerRole))
+                .build();
+
+        when(userRepository.findByEmail("rbac@test.com")).thenReturn(Optional.of(user));
+
+        assertTrue(authService.hasPermission("rbac@test.com", "bid:place"));
+        assertFalse(authService.hasPermission("rbac@test.com", "auction:create"));
     }
 }

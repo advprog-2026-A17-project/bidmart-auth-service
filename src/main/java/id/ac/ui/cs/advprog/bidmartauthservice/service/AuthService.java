@@ -150,4 +150,14 @@ public class AuthService {
 
         return userRepository.save(user);
     }
+
+    public boolean hasPermission(String email, String permissionName) {
+        return userRepository.findByEmail(email)
+                .map(user -> user.getRoles().stream()
+                        .flatMap(role -> role.getPermissions() == null
+                                ? java.util.stream.Stream.empty()
+                                : role.getPermissions().stream())
+                        .anyMatch(permission -> permissionName.equals(permission.getName())))
+                .orElse(false);
+    }
 }
