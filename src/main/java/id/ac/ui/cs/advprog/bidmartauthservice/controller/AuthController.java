@@ -107,4 +107,17 @@ public class AuthController {
         authService.resendVerification(request.email());
         return ResponseEntity.noContent().build();
     }
+
+    @GetMapping("/sessions")
+    public ResponseEntity<?> getActiveSessions(@RequestParam String email) {
+        return ResponseEntity.ok(tokenService.listActiveSessions(email));
+    }
+
+    @PostMapping("/admin/disable-user")
+    public ResponseEntity<Void> disableUser(@RequestParam String email) {
+        return authService.disableUser(email).map(user -> {
+            tokenService.revokeAllSessionsForUser(user.getId());
+            return ResponseEntity.noContent().<Void>build();
+        }).orElse(ResponseEntity.notFound().build());
+    }
 }
