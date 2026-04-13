@@ -4,6 +4,8 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.LoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.AuthUserResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RefreshTokenRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.UserProfileResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.AuthService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
@@ -65,6 +67,26 @@ public class AuthController {
 
         return authService.findByEmail(email)
                 .map(AuthUserResponse::fromUser)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/profile")
+    public ResponseEntity<?> getProfile(@RequestParam String email) {
+        return authService.getProfileByEmail(email)
+                .map(UserProfileResponse::fromUser)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PutMapping("/profile")
+    public ResponseEntity<?> updateProfile(@Valid @RequestBody UpdateProfileRequest request) {
+        return authService.updateProfile(
+                        request.email(),
+                        request.displayName(),
+                        request.avatarUrl(),
+                        request.shippingAddress())
+                .map(UserProfileResponse::fromUser)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }

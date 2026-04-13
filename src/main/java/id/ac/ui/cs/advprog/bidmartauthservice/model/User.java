@@ -26,6 +26,15 @@ public class User {
 
     private boolean enabled = true;
 
+    @Column(name = "display_name")
+    private String displayName;
+
+    @Column(name = "avatar_url")
+    private String avatarUrl;
+
+    @Column(name = "shipping_address")
+    private String shippingAddress;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "user_roles",
