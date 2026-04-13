@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.LoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RefreshTokenRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
@@ -266,5 +268,39 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.email").value("buyer@test.com"))
                 .andExpect(jsonPath("$.displayName").value("Buyer Updated"))
                 .andExpect(jsonPath("$.password").doesNotExist());
+    }
+
+    @Test
+    void verifyEmailShouldReturnOkWhenTokenValid() throws Exception {
+        when(authService.verifyEmail("valid-token")).thenReturn(true);
+        VerifyEmailRequest request = new VerifyEmailRequest("valid-token");
+
+        mockMvc.perform(post("/api/v1/auth/verify-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(content().string("Email verified"));
+    }
+
+    @Test
+    void verifyEmailShouldReturnBadRequestWhenTokenInvalid() throws Exception {
+        when(authService.verifyEmail("invalid-token")).thenReturn(false);
+        VerifyEmailRequest request = new VerifyEmailRequest("invalid-token");
+
+        mockMvc.perform(post("/api/v1/auth/verify-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string("Invalid or expired verification token"));
+    }
+
+    @Test
+    void resendVerificationShouldReturnNoContent() throws Exception {
+        ResendVerificationRequest request = new ResendVerificationRequest("buyer@test.com");
+
+        mockMvc.perform(post("/api/v1/auth/resend-verification")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
     }
 }
