@@ -5,6 +5,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.RefreshToken;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,6 +14,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -27,6 +29,9 @@ class TokenServiceTest {
 
     @Mock
     private RefreshTokenRepository refreshTokenRepository;
+
+    @Mock
+    private UserRepository userRepository;
 
     @InjectMocks
     private TokenService tokenService;
@@ -108,5 +113,53 @@ class TokenServiceTest {
 
         assertTrue(existing.isRevoked());
         verify(refreshTokenRepository).save(existing);
+    }
+
+    @Test
+    void listActiveSessionsShouldReturnUserSessionsByEmail() {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("token@test.com")
+                .enabled(true)
+                .roles(Set.of(Role.builder().id(UUID.randomUUID()).name("BUYER").build()))
+                .build();
+        RefreshToken activeSession = RefreshToken.builder()
+                .id(UUID.randomUUID())
+                .tokenId(UUID.randomUUID())
+                .user(user)
+                .expiresAt(Instant.now().plusSeconds(1800))
+                .revoked(false)
+                .build();
+
+        when(userRepository.findByEmail("token@test.com")).thenReturn(Optional.of(user));
+        when(refreshTokenRepository.findByUserIdAndRevokedFalse(user.getId()))
+                .thenReturn(List.of(activeSession));
+
+        assertEquals(1, tokenService.listActiveSessions("token@test.com").size());
+    }
+
+    @Test
+    void revokeSessionByTokenIdShouldRevokeSessionWhenExists() {
+        UUID tokenId = UUID.randomUUID();
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("token@test.com")
+                .enabled(true)
+                .roles(Set.of(Role.builder().id(UUID.randomUUID()).name("BUYER").build()))
+                .build();
+        RefreshToken session = RefreshToken.builder()
+                .id(UUID.randomUUID())
+                .tokenId(tokenId)
+                .user(user)
+                .expiresAt(Instant.now().plusSeconds(1800))
+                .revoked(false)
+                .build();
+
+        when(refreshTokenRepository.findByTokenIdAndRevokedFalse(tokenId)).thenReturn(Optional.of(session));
+
+        tokenService.revokeSessionByTokenId(tokenId);
+
+        assertTrue(session.isRevoked());
+        verify(refreshTokenRepository).save(session);
     }
 }
