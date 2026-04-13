@@ -50,6 +50,21 @@ tasks.withType<Test> {
     finalizedBy(tasks.jacocoTestReport)
 }
 
+tasks.test {
+    useJUnitPlatform {
+        includeTags("unit")
+    }
+}
+
+tasks.register<Test>("integrationTest") {
+    description = "Runs integration tests"
+    group = "verification"
+    useJUnitPlatform {
+        includeTags("integration")
+    }
+    shouldRunAfter(tasks.test)
+}
+
 tasks.jacocoTestReport {
     dependsOn(tasks.test)
     reports {
