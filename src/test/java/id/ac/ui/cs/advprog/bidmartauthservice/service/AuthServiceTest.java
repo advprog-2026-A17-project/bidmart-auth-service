@@ -31,6 +31,9 @@ class AuthServiceTest {
     @Mock
     private PasswordEncoder passwordEncoder;
 
+    @Mock
+    private AuthEventPublisher authEventPublisher;
+
     @InjectMocks
     private AuthService authService;
 
@@ -67,6 +70,7 @@ class AuthServiceTest {
         verify(roleRepository).findByName(roleName);
         verify(passwordEncoder).encode(password);
         verify(userRepository).save(any(User.class));
+        verify(authEventPublisher).publishUserRegistered(saved);
     }
 
     @Test
@@ -228,6 +232,7 @@ class AuthServiceTest {
         assertTrue(user.isEmailVerified());
         assertNull(user.getVerificationToken());
         assertNull(user.getVerificationTokenExpiresAt());
+        verify(authEventPublisher).publishEmailVerified(user);
     }
 
     @Test
@@ -246,6 +251,7 @@ class AuthServiceTest {
         assertTrue(disabled.isPresent());
         assertFalse(disabled.get().isEnabled());
         verify(userRepository).save(user);
+        verify(authEventPublisher).publishUserDisabled(user);
     }
 
     @Test
