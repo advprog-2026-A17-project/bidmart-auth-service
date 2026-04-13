@@ -4,8 +4,10 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.LoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.AuthUserResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RefreshTokenRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UserProfileResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.AuthService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
@@ -89,5 +91,20 @@ public class AuthController {
                 .map(UserProfileResponse::fromUser)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/verify-email")
+    public ResponseEntity<String> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        boolean verified = authService.verifyEmail(request.token());
+        if (verified) {
+            return ResponseEntity.ok("Email verified");
+        }
+        return ResponseEntity.badRequest().body("Invalid or expired verification token");
+    }
+
+    @PostMapping("/resend-verification")
+    public ResponseEntity<Void> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
+        authService.resendVerification(request.email());
+        return ResponseEntity.noContent().build();
     }
 }

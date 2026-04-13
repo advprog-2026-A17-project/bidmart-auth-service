@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -39,6 +40,9 @@ public class AuthService {
                 .email(email)
                 .password(passwordEncoder.encode(password))
                 .enabled(true)
+                .emailVerified(false)
+                .verificationToken(UUID.randomUUID().toString())
+                .verificationTokenExpiresAt(Instant.now().plusSeconds(86400))
                 .roles(Set.of(role))
                 .build();
 
@@ -50,6 +54,7 @@ public class AuthService {
         Optional<User> userOpt = userRepository.findByEmail(email);
 
         if (userOpt.isPresent() &&
+                userOpt.get().isEmailVerified() &&
                 passwordEncoder.matches(password, userOpt.get().getPassword())) {
 
             return userOpt;
@@ -78,5 +83,29 @@ public class AuthService {
             user.setShippingAddress(shippingAddress);
             return userRepository.save(user);
         });
+    }
+
+    public boolean verifyEmail(String token) {
+        return userRepository.findByVerificationToken(token)
+                .filter(user -> user.getVerificationTokenExpiresAt() != null &&
+                        user.getVerificationTokenExpiresAt().isAfter(Instant.now()))
+                .map(user -> {
+                    user.setEmailVerified(true);
+                    user.setVerificationToken(null);
+                    user.setVerificationTokenExpiresAt(null);
+                    userRepository.save(user);
+                    return true;
+                })
+                .orElse(false);
+    }
+
+    public void resendVerification(String email) {
+        userRepository.findByEmail(email)
+                .filter(user -> !user.isEmailVerified())
+                .ifPresent(user -> {
+                    user.setVerificationToken(UUID.randomUUID().toString());
+                    user.setVerificationTokenExpiresAt(Instant.now().plusSeconds(86400));
+                    userRepository.save(user);
+                });
     }
 }
