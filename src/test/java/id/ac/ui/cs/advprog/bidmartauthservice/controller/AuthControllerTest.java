@@ -7,6 +7,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.SessionResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.OAuthLoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
@@ -324,7 +325,46 @@ class AuthControllerTest {
         when(authService.disableUser("buyer@test.com")).thenReturn(Optional.of(new User()));
 
         mockMvc.perform(post("/api/v1/auth/admin/disable-user")
-                        .param("email", "buyer@test.com"))
+                .param("email", "buyer@test.com"))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void oauthLoginShouldReturnTokenResponse() throws Exception {
+        Role buyerRole = Role.builder()
+                .id(UUID.randomUUID())
+                .name("BUYER")
+                .build();
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("oauth@test.com")
+                .enabled(true)
+                .emailVerified(true)
+                .roles(Set.of(buyerRole))
+                .build();
+
+        when(authService.oauthLogin("google", "google-user-1", "oauth@test.com", "OAuth User"))
+                .thenReturn(user);
+        when(tokenService.issueTokens(user)).thenReturn(new TokenResponse(
+                "oauth-access-token",
+                "oauth-refresh-token",
+                "Bearer",
+                900,
+                null
+        ));
+
+        OAuthLoginRequest request = new OAuthLoginRequest(
+                "google",
+                "google-user-1",
+                "oauth@test.com",
+                "OAuth User"
+        );
+
+        mockMvc.perform(post("/api/v1/auth/oauth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").value("oauth-access-token"))
+                .andExpect(jsonPath("$.refreshToken").value("oauth-refresh-token"));
     }
 }

@@ -38,6 +38,12 @@ public class User {
     @Column(name = "verification_token_expires_at")
     private Instant verificationTokenExpiresAt;
 
+    @Column(name = "oauth_provider")
+    private String oauthProvider;
+
+    @Column(name = "oauth_subject")
+    private String oauthSubject;
+
     @Column(name = "display_name")
     private String displayName;
 

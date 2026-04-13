@@ -115,4 +115,33 @@ public class AuthService {
             return userRepository.save(user);
         });
     }
+
+    public User oauthLogin(String provider, String providerUserId, String email, String displayName) {
+        Optional<User> existingUser = userRepository.findByEmail(email);
+        if (existingUser.isPresent()) {
+            return existingUser.get();
+        }
+
+        Role buyerRole = roleRepository.findByName("BUYER")
+                .orElseGet(() -> roleRepository.save(Role.builder()
+                        .id(UUID.randomUUID())
+                        .name("BUYER")
+                        .build()));
+
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email(email)
+                .password(passwordEncoder.encode(UUID.randomUUID().toString()))
+                .enabled(true)
+                .emailVerified(true)
+                .verificationToken(null)
+                .verificationTokenExpiresAt(null)
+                .oauthProvider(provider)
+                .oauthSubject(providerUserId)
+                .displayName(displayName)
+                .roles(Set.of(buyerRole))
+                .build();
+
+        return userRepository.save(user);
+    }
 }
