@@ -145,7 +145,6 @@ class AuthServiceTest {
         user.setEmailVerified(false);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
-        when(passwordEncoder.matches(password, "encoded-secret")).thenReturn(true);
 
         Optional<User> result = authService.login(email, password);
 
