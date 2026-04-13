@@ -10,6 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -27,6 +28,9 @@ class AuthServiceTest {
     @Mock
     private RoleRepository roleRepository;
 
+    @Mock
+    private PasswordEncoder passwordEncoder;
+
     @InjectMocks
     private AuthService authService;
 
@@ -43,6 +47,7 @@ class AuthServiceTest {
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.empty());
         when(roleRepository.findByName(roleName)).thenReturn(Optional.of(role));
+        when(passwordEncoder.encode(password)).thenReturn("encoded-pass");
         when(userRepository.save(any(User.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -51,12 +56,13 @@ class AuthServiceTest {
         assertNotNull(saved);
         assertNotNull(saved.getId());
         assertEquals(email, saved.getEmail());
-        assertEquals(password, saved.getPassword());
+        assertEquals("encoded-pass", saved.getPassword());
         assertTrue(saved.isEnabled());
         assertNotNull(saved.getRoles());
         assertTrue(saved.getRoles().contains(role));
         verify(userRepository).findByEmail(email);
         verify(roleRepository).findByName(roleName);
+        verify(passwordEncoder).encode(password);
         verify(userRepository).save(any(User.class));
     }
 
@@ -85,14 +91,16 @@ class AuthServiceTest {
 
         User user = new User();
         user.setEmail(email);
-        user.setPassword(password);
+        user.setPassword("encoded-secret");
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches(password, "encoded-secret")).thenReturn(true);
 
         Optional<User> result = authService.login(email, password);
 
         assertTrue(result.isPresent());
         assertEquals(email, result.get().getEmail());
+        verify(passwordEncoder).matches(password, "encoded-secret");
     }
 
     @Test
@@ -101,13 +109,15 @@ class AuthServiceTest {
 
         User user = new User();
         user.setEmail(email);
-        user.setPassword("secret");
+        user.setPassword("encoded-secret");
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong-password", "encoded-secret")).thenReturn(false);
 
         Optional<User> result = authService.login(email, "wrong-password");
 
         assertFalse(result.isPresent());
+        verify(passwordEncoder).matches("wrong-password", "encoded-secret");
     }
 
     @Test
