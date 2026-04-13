@@ -58,6 +58,9 @@ class AuthServiceTest {
         assertEquals(email, saved.getEmail());
         assertEquals("encoded-pass", saved.getPassword());
         assertTrue(saved.isEnabled());
+        assertFalse(saved.isEmailVerified());
+        assertNotNull(saved.getVerificationToken());
+        assertNotNull(saved.getVerificationTokenExpiresAt());
         assertNotNull(saved.getRoles());
         assertTrue(saved.getRoles().contains(role));
         verify(userRepository).findByEmail(email);
@@ -92,6 +95,7 @@ class AuthServiceTest {
         User user = new User();
         user.setEmail(email);
         user.setPassword("encoded-secret");
+        user.setEmailVerified(true);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches(password, "encoded-secret")).thenReturn(true);
@@ -110,6 +114,7 @@ class AuthServiceTest {
         User user = new User();
         user.setEmail(email);
         user.setPassword("encoded-secret");
+        user.setEmailVerified(true);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("wrong-password", "encoded-secret")).thenReturn(false);
@@ -125,6 +130,24 @@ class AuthServiceTest {
         when(userRepository.findByEmail("unknown@test.com")).thenReturn(Optional.empty());
 
         Optional<User> result = authService.login("unknown@test.com", "secret");
+
+        assertFalse(result.isPresent());
+    }
+
+    @Test
+    void loginShouldReturnEmptyWhenEmailNotVerified() {
+        String email = "find@test.com";
+        String password = "secret";
+
+        User user = new User();
+        user.setEmail(email);
+        user.setPassword("encoded-secret");
+        user.setEmailVerified(false);
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches(password, "encoded-secret")).thenReturn(true);
+
+        Optional<User> result = authService.login(email, password);
 
         assertFalse(result.isPresent());
     }
@@ -184,5 +207,27 @@ class AuthServiceTest {
         assertEquals("https://cdn.example.com/new-avatar.png", updated.get().getAvatarUrl());
         assertEquals("New Address", updated.get().getShippingAddress());
         verify(userRepository).save(user);
+    }
+
+    @Test
+    void verifyEmailShouldMarkUserVerifiedWhenTokenValid() {
+        String token = UUID.randomUUID().toString();
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("verify@test.com")
+                .verificationToken(token)
+                .verificationTokenExpiresAt(java.time.Instant.now().plusSeconds(600))
+                .emailVerified(false)
+                .build();
+
+        when(userRepository.findByVerificationToken(token)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        boolean verified = authService.verifyEmail(token);
+
+        assertTrue(verified);
+        assertTrue(user.isEmailVerified());
+        assertNull(user.getVerificationToken());
+        assertNull(user.getVerificationTokenExpiresAt());
     }
 }
