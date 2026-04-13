@@ -22,6 +22,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AuthEventPublisher authEventPublisher;
 
     public User register(String email, String password, String roleName) {
 
@@ -46,7 +47,9 @@ public class AuthService {
                 .roles(Set.of(role))
                 .build();
 
-        return userRepository.save(user);
+        User savedUser = userRepository.save(user);
+        authEventPublisher.publishUserRegistered(savedUser);
+        return savedUser;
     }
 
     public Optional<User> login(String email, String password) {
@@ -94,6 +97,7 @@ public class AuthService {
                     user.setVerificationToken(null);
                     user.setVerificationTokenExpiresAt(null);
                     userRepository.save(user);
+                    authEventPublisher.publishEmailVerified(user);
                     return true;
                 })
                 .orElse(false);
@@ -112,7 +116,9 @@ public class AuthService {
     public Optional<User> disableUser(String email) {
         return userRepository.findByEmail(email).map(user -> {
             user.setEnabled(false);
-            return userRepository.save(user);
+            User savedUser = userRepository.save(user);
+            authEventPublisher.publishUserDisabled(savedUser);
+            return savedUser;
         });
     }
 
