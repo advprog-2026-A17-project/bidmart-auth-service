@@ -10,6 +10,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.OAuthLoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
@@ -201,6 +202,19 @@ class AuthControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void registerShouldReturnBadRequestWhenRoleNotFound() throws Exception {
+        when(authService.register("controller@test.com", "pass", "BUYER"))
+                .thenThrow(new RoleNotFoundException("Role not found"));
+        RegisterRequest request = new RegisterRequest("controller@test.com", "pass", "BUYER");
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Role not found"));
     }
 
     @Test
