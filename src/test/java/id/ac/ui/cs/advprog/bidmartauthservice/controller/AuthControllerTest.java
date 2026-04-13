@@ -367,4 +367,15 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.accessToken").value("oauth-access-token"))
                 .andExpect(jsonPath("$.refreshToken").value("oauth-refresh-token"));
     }
+
+    @Test
+    void checkPermissionShouldReturnAllowedFlag() throws Exception {
+        when(authService.hasPermission("buyer@test.com", "bid:place")).thenReturn(true);
+
+        mockMvc.perform(get("/api/v1/auth/permissions/check")
+                        .param("email", "buyer@test.com")
+                        .param("permission", "bid:place"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true));
+    }
 }
