@@ -12,6 +12,8 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
@@ -372,7 +374,7 @@ class AuthControllerTest {
                 .roles(Set.of(buyerRole))
                 .build();
 
-        when(authService.oauthLogin("google", "google-user-1", "oauth@test.com", "OAuth User"))
+        when(authService.oauthLogin("google", "google-id-token"))
                 .thenReturn(user);
         when(tokenService.issueTokens(user)).thenReturn(new TokenResponse(
                 "oauth-access-token",
@@ -384,9 +386,7 @@ class AuthControllerTest {
 
         OAuthLoginRequest request = new OAuthLoginRequest(
                 "google",
-                "google-user-1",
-                "oauth@test.com",
-                "OAuth User"
+                "google-id-token"
         );
 
         mockMvc.perform(post("/api/v1/auth/oauth/login")
@@ -395,6 +395,34 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").value("oauth-access-token"))
                 .andExpect(jsonPath("$.refreshToken").value("oauth-refresh-token"));
+    }
+
+    @Test
+    void oauthLoginShouldReturnBadRequestWhenProviderUnsupported() throws Exception {
+        when(authService.oauthLogin("github", "provider-token"))
+                .thenThrow(new UnsupportedOAuthProviderException("Unsupported OAuth provider"));
+
+        OAuthLoginRequest request = new OAuthLoginRequest("github", "provider-token");
+
+        mockMvc.perform(post("/api/v1/auth/oauth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Unsupported OAuth provider"));
+    }
+
+    @Test
+    void oauthLoginShouldReturnUnauthorizedWhenGoogleTokenInvalid() throws Exception {
+        when(authService.oauthLogin("google", "invalid-id-token"))
+                .thenThrow(new InvalidOAuthTokenException("Invalid Google ID token"));
+
+        OAuthLoginRequest request = new OAuthLoginRequest("google", "invalid-id-token");
+
+        mockMvc.perform(post("/api/v1/auth/oauth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid Google ID token"));
     }
 
     @Test
