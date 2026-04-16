@@ -17,6 +17,7 @@ class MigrationSchemaTest {
     void migrationsShouldCreateUsersBeforeRoleMappings() throws IOException {
         String v1 = Files.readString(Path.of("src/main/resources/db/migration/V1__initial_user_schema.sql"));
         String v2 = Files.readString(Path.of("src/main/resources/db/migration/V2__identity_management_schema.sql"));
+        String v7 = Files.readString(Path.of("src/main/resources/db/migration/V7__drop_legacy_role_column.sql"));
         String v9 = Files.readString(Path.of("src/main/resources/db/migration/V9__seed_default_roles.sql"));
 
         assertTrue(v1.toLowerCase().contains("create table users"),
@@ -25,10 +26,12 @@ class MigrationSchemaTest {
                 "V2 should define roles table");
         assertTrue(v2.toLowerCase().contains("create table user_roles"),
                 "V2 should define user_roles mapping table");
-        assertFalse(v1.toLowerCase().contains(" role varchar"),
-                "V1 should not contain legacy role column on users table");
+        assertTrue(v1.toLowerCase().contains(" role varchar"),
+                "V1 must keep original legacy role column for Flyway checksum stability");
         assertFalse(v2.toLowerCase().contains(" role varchar"),
                 "V2 should not contain legacy role column on users table");
+        assertTrue(v7.toLowerCase().contains("drop column if exists role"),
+                "V7 should drop legacy role column from users table");
         assertTrue(v9.contains("BUYER"), "V9 should seed BUYER role");
         assertTrue(v9.contains("SELLER"), "V9 should seed SELLER role");
     }
