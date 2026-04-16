@@ -26,10 +26,10 @@ Base path: `/api/v1/auth`
   Update profile fields (displayName, avatarUrl, shippingAddress).
 
 - `POST /api/v1/auth/verify-email`  
-  Verify account email using verification token.
+  Verify account email using one-time opaque verification token.
 
 - `POST /api/v1/auth/resend-verification`  
-  Re-issue verification token for unverified accounts.
+  Re-issue verification token for unverified accounts (previous active token invalidated, cooldown enforced).
 
 - `GET /api/v1/auth/sessions`  
   List active refresh-token sessions for an account.
@@ -38,7 +38,7 @@ Base path: `/api/v1/auth`
   Disable user and revoke all active sessions.
 
 - `POST /api/v1/auth/oauth/login`  
-  OAuth bootstrap login and token issuance.
+  Google SSO login and token issuance (`provider=google`, `idToken=<google-id-token>`).
 
 - `GET /api/v1/auth/permissions/check`  
   Check if a user has a permission key.
@@ -48,3 +48,9 @@ Base path: `/api/v1/auth`
 - Access token: JWT (`Bearer`) with user identity and role claims.
 - Refresh token: JWT with rotation on refresh.
 - Revocation: refresh token/session revocation on logout and admin disable.
+
+## Email Verification Contract
+
+- Verification tokens are random opaque values and are stored hashed server-side.
+- A token is one-time use and becomes invalid once consumed.
+- Resending verification invalidates prior active tokens and issues a fresh token.
