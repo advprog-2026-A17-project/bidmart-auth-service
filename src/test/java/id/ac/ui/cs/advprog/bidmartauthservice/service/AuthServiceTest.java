@@ -54,6 +54,9 @@ class AuthServiceTest {
     @Mock
     private VerificationEmailSender verificationEmailSender;
 
+    @Mock
+    private VerificationTokenCodec verificationTokenCodec;
+
     @InjectMocks
     private AuthService authService;
 
@@ -71,8 +74,12 @@ class AuthServiceTest {
         when(userRepository.findByEmail(email)).thenReturn(Optional.empty());
         when(roleRepository.findByName(roleName)).thenReturn(Optional.of(role));
         when(passwordEncoder.encode(password)).thenReturn("encoded-pass");
+        when(verificationTokenCodec.generateRawToken()).thenReturn("raw-register-token");
+        when(verificationTokenCodec.hashToken("raw-register-token")).thenReturn("a".repeat(64));
         when(userRepository.save(any(User.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        when(emailVerificationTokenRepository.findByUserAndUsedAtIsNull(any(User.class)))
+                .thenReturn(java.util.List.of());
         when(emailVerificationTokenRepository.save(any(EmailVerificationToken.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -279,6 +286,7 @@ class AuthServiceTest {
     void verifyEmailShouldMarkUserVerifiedWhenTokenValid() {
         String token = "raw-verification-token";
         String tokenHash = sha256Hex(token);
+        when(verificationTokenCodec.hashToken(token)).thenReturn(tokenHash);
         User user = User.builder()
                 .id(UUID.randomUUID())
                 .email("verify@test.com")
@@ -310,6 +318,7 @@ class AuthServiceTest {
     @Test
     void verifyEmailShouldReturnFalseWhenTokenInvalid() {
         String token = "unknown-token";
+        when(verificationTokenCodec.hashToken(token)).thenReturn(sha256Hex(token));
         when(emailVerificationTokenRepository.findByTokenHashAndUsedAtIsNull(sha256Hex(token)))
                 .thenReturn(Optional.empty());
 
@@ -343,6 +352,8 @@ class AuthServiceTest {
                 .thenReturn(Optional.of(existingToken));
         when(emailVerificationTokenRepository.findByUserAndUsedAtIsNull(user))
                 .thenReturn(java.util.List.of(existingToken));
+        when(verificationTokenCodec.generateRawToken()).thenReturn("raw-resend-token");
+        when(verificationTokenCodec.hashToken("raw-resend-token")).thenReturn("b".repeat(64));
         when(emailVerificationTokenRepository.save(any(EmailVerificationToken.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
