@@ -14,12 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -36,14 +31,13 @@ public class AuthService {
     private final AuthEventPublisher authEventPublisher;
     private final LoginEligibilityPolicy loginEligibilityPolicy;
     private final VerificationEmailSender verificationEmailSender;
+    private final VerificationTokenCodec verificationTokenCodec;
 
     @Value("${app.auth.email-verification.token-ttl-seconds:86400}")
     private long verificationTokenTtlSeconds;
 
     @Value("${app.auth.email-verification.resend-cooldown-seconds:60}")
     private long resendCooldownSeconds;
-
-    private final SecureRandom secureRandom = new SecureRandom();
 
     public User register(String email, String password, String roleName) {
 
@@ -103,7 +97,7 @@ public class AuthService {
 
     public boolean verifyEmail(String token) {
         Instant now = Instant.now();
-        String tokenHash = hashToken(token);
+        String tokenHash = verificationTokenCodec.hashToken(token);
 
         Optional<EmailVerificationToken> tokenRecord = emailVerificationTokenRepository
                 .findByTokenHashAndUsedAtIsNull(tokenHash);
@@ -199,11 +193,11 @@ public class AuthService {
 
         invalidateActiveTokens(user, now);
 
-        String rawToken = generateOpaqueToken();
+        String rawToken = verificationTokenCodec.generateRawToken();
         EmailVerificationToken token = EmailVerificationToken.builder()
                 .id(UUID.randomUUID())
                 .user(user)
-                .tokenHash(hashToken(rawToken))
+                .tokenHash(verificationTokenCodec.hashToken(rawToken))
                 .expiresAt(now.plusSeconds(verificationTokenTtlSeconds))
                 .createdAt(now)
                 .lastSentAt(now)
@@ -226,26 +220,6 @@ public class AuthService {
         for (EmailVerificationToken activeToken : activeTokens) {
             activeToken.setUsedAt(now);
             emailVerificationTokenRepository.save(activeToken);
-        }
-    }
-
-    private String generateOpaqueToken() {
-        byte[] tokenBytes = new byte[32];
-        secureRandom.nextBytes(tokenBytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
-    }
-
-    private String hashToken(String rawToken) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder();
-            for (byte value : bytes) {
-                builder.append(String.format("%02x", value));
-            }
-            return builder.toString();
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 not available", ex);
         }
     }
 }
