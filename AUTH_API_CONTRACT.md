@@ -38,7 +38,7 @@ Base path: `/api/v1/auth`
   Disable user and revoke all active sessions.
 
 - `POST /api/v1/auth/oauth/login`  
-  OAuth bootstrap login and token issuance.
+  Google SSO login and token issuance (`provider=google`, `idToken=<google-id-token>`).
 
 - `GET /api/v1/auth/permissions/check`  
   Check if a user has a permission key.

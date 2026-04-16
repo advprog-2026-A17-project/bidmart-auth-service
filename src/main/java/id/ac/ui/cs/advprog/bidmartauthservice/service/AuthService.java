@@ -6,9 +6,13 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.EmailVerificationToken;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -16,6 +20,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -32,6 +37,7 @@ public class AuthService {
     private final LoginEligibilityPolicy loginEligibilityPolicy;
     private final VerificationEmailSender verificationEmailSender;
     private final VerificationTokenCodec verificationTokenCodec;
+    private final OAuthIdentityVerifier oauthIdentityVerifier;
 
     @Value("${app.auth.email-verification.token-ttl-seconds:86400}")
     private long verificationTokenTtlSeconds;
@@ -147,10 +153,16 @@ public class AuthService {
         });
     }
 
-    public User oauthLogin(String provider, String providerUserId, String email, String displayName) {
-        Optional<User> existingUser = userRepository.findByEmail(email);
+    public User oauthLogin(String provider, String idToken) {
+        if (!oauthIdentityVerifier.supports(provider)) {
+            throw new UnsupportedOAuthProviderException("Unsupported OAuth provider");
+        }
+
+        OAuthIdentity identity = oauthIdentityVerifier.verify(idToken);
+        Optional<User> existingUser = userRepository.findByEmail(identity.email());
+
         if (existingUser.isPresent()) {
-            return existingUser.get();
+            return updateExistingOAuthUser(existingUser.get(), provider, identity);
         }
 
         Role buyerRole = roleRepository.findByName("BUYER")
@@ -161,19 +173,50 @@ public class AuthService {
 
         User user = User.builder()
                 .id(UUID.randomUUID())
-                .email(email)
+                .email(identity.email())
                 .password(passwordEncoder.encode(UUID.randomUUID().toString()))
                 .enabled(true)
                 .emailVerified(true)
                 .verificationToken(null)
                 .verificationTokenExpiresAt(null)
-                .oauthProvider(provider)
-                .oauthSubject(providerUserId)
-                .displayName(displayName)
+                .oauthProvider(provider.toLowerCase(Locale.ROOT))
+                .oauthSubject(identity.subject())
+                .displayName(identity.displayName())
+                .avatarUrl(identity.avatarUrl())
                 .roles(Set.of(buyerRole))
                 .build();
 
         return userRepository.save(user);
+    }
+
+    private User updateExistingOAuthUser(User existingUser, String provider, OAuthIdentity identity) {
+        boolean oauthAlreadyLinked = !isBlank(existingUser.getOauthProvider())
+                || !isBlank(existingUser.getOauthSubject());
+        if (oauthAlreadyLinked && !isMatchingOauthIdentity(existingUser, provider, identity)) {
+            throw new InvalidOAuthTokenException("Google account is not linked to this user");
+        }
+
+        existingUser.setOauthProvider(provider.toLowerCase(Locale.ROOT));
+        existingUser.setOauthSubject(identity.subject());
+        existingUser.setEmailVerified(true);
+
+        if (isBlank(existingUser.getDisplayName())) {
+            existingUser.setDisplayName(identity.displayName());
+        }
+        if (isBlank(existingUser.getAvatarUrl())) {
+            existingUser.setAvatarUrl(identity.avatarUrl());
+        }
+
+        return userRepository.save(existingUser);
+    }
+
+    private boolean isMatchingOauthIdentity(User user, String provider, OAuthIdentity identity) {
+        return provider.equalsIgnoreCase(user.getOauthProvider())
+                && identity.subject().equals(user.getOauthSubject());
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     public boolean hasPermission(String email, String permissionName) {
