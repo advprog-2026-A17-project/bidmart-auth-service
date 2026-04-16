@@ -133,6 +133,25 @@ class AuthServiceTest {
     }
 
     @Test
+    void loginShouldReturnEmptyWhenUserIsDisabled() {
+        String email = "disabled@test.com";
+        String password = "secret";
+
+        User user = new User();
+        user.setEmail(email);
+        user.setPassword("encoded-secret");
+        user.setEmailVerified(true);
+        user.setEnabled(false);
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches(password, "encoded-secret")).thenReturn(true);
+
+        Optional<User> result = authService.login(email, password);
+
+        assertFalse(result.isPresent());
+    }
+
+    @Test
     void loginShouldReturnEmptyWhenUserNotFound() {
         when(userRepository.findByEmail("unknown@test.com")).thenReturn(Optional.empty());
 
