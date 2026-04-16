@@ -53,7 +53,7 @@ jobs:
           fi
 
           set +e
-          ./gradlew classes sonar 2>&1 | tee sonar.log
+          ./gradlew test jacocoTestReport sonar 2>&1 | tee sonar.log
           sonar_status=${PIPESTATUS[0]}
           set -e
 
