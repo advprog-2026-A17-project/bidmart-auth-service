@@ -4,9 +4,9 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
 
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredException;
-import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -25,6 +25,7 @@ public class AuthService {
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthEventPublisher authEventPublisher;
+    private final LoginEligibilityPolicy loginEligibilityPolicy;
 
     public User register(String email, String password, String roleName) {
 
@@ -55,19 +56,10 @@ public class AuthService {
     }
 
     public Optional<User> login(String email, String password) {
-
-        Optional<User> userOpt = userRepository.findByEmail(email);
-
-        if (userOpt.isPresent()
-                && userOpt.get().isEnabled()
-                && passwordEncoder.matches(password, userOpt.get().getPassword())) {
-            if (!userOpt.get().isEmailVerified()) {
-                throw new EmailNotVerifiedException("Email not verified");
-            }
-            return userOpt;
-        }
-
-        return Optional.empty();
+        return userRepository.findByEmail(email)
+                .filter(loginEligibilityPolicy::isPasswordCheckAllowed)
+                .filter(user -> passwordEncoder.matches(password, user.getPassword()))
+                .flatMap(loginEligibilityPolicy::resolveSuccessfulLogin);
     }
 
     public Optional<User> findByEmail(String email) {

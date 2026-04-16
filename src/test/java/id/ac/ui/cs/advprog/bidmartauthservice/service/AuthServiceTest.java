@@ -6,6 +6,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.Permission;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,6 +37,9 @@ class AuthServiceTest {
 
     @Mock
     private AuthEventPublisher authEventPublisher;
+
+    @Mock
+    private LoginEligibilityPolicy loginEligibilityPolicy;
 
     @InjectMocks
     private AuthService authService;
@@ -106,7 +110,9 @@ class AuthServiceTest {
         user.setEmailVerified(true);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(loginEligibilityPolicy.isPasswordCheckAllowed(user)).thenReturn(true);
         when(passwordEncoder.matches(password, "encoded-secret")).thenReturn(true);
+        when(loginEligibilityPolicy.resolveSuccessfulLogin(user)).thenReturn(Optional.of(user));
 
         Optional<User> result = authService.login(email, password);
 
@@ -126,6 +132,7 @@ class AuthServiceTest {
         user.setEmailVerified(true);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(loginEligibilityPolicy.isPasswordCheckAllowed(user)).thenReturn(true);
         when(passwordEncoder.matches("wrong-password", "encoded-secret")).thenReturn(false);
 
         Optional<User> result = authService.login(email, "wrong-password");
@@ -146,6 +153,7 @@ class AuthServiceTest {
         user.setEnabled(false);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(loginEligibilityPolicy.isPasswordCheckAllowed(user)).thenReturn(false);
 
         Optional<User> result = authService.login(email, password);
 
@@ -174,7 +182,10 @@ class AuthServiceTest {
         user.setEmailVerified(false);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(loginEligibilityPolicy.isPasswordCheckAllowed(user)).thenReturn(true);
         when(passwordEncoder.matches(password, "encoded-secret")).thenReturn(true);
+        when(loginEligibilityPolicy.resolveSuccessfulLogin(user))
+                .thenThrow(new EmailNotVerifiedException("Email not verified"));
 
         EmailNotVerifiedException exception = assertThrows(
                 EmailNotVerifiedException.class,
