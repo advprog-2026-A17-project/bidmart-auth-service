@@ -9,6 +9,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.provisioning.WalletProvisioningOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
@@ -63,6 +64,9 @@ class AuthServiceTest {
     @Mock
     private OAuthIdentityVerifier oauthIdentityVerifier;
 
+    @Mock
+    private WalletProvisioningOutboxService walletProvisioningOutboxService;
+
     @InjectMocks
     private AuthService authService;
 
@@ -114,6 +118,7 @@ class AuthServiceTest {
         verify(roleRepository).findByName(roleName);
         verify(passwordEncoder).encode(password);
         verify(userRepository).save(any(User.class));
+        verify(walletProvisioningOutboxService).enqueueWalletProvisionRequested(saved);
         verify(authEventPublisher).publishUserRegistered(saved);
     }
 
@@ -133,6 +138,7 @@ class AuthServiceTest {
         verify(userRepository).findByEmail(email);
         verify(roleRepository, never()).findByName(anyString());
         verify(userRepository, never()).save(any(User.class));
+        verify(walletProvisioningOutboxService, never()).enqueueWalletProvisionRequested(any(User.class));
     }
 
     @Test

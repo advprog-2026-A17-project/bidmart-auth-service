@@ -6,6 +6,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.EmailVerificationToken;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.provisioning.WalletProvisioningOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
@@ -17,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -38,6 +40,7 @@ public class AuthService {
     private final VerificationEmailSender verificationEmailSender;
     private final VerificationTokenCodec verificationTokenCodec;
     private final OAuthIdentityVerifier oauthIdentityVerifier;
+    private final WalletProvisioningOutboxService walletProvisioningOutboxService;
 
     @Value("${app.auth.email-verification.token-ttl-seconds:86400}")
     private long verificationTokenTtlSeconds;
@@ -45,6 +48,7 @@ public class AuthService {
     @Value("${app.auth.email-verification.resend-cooldown-seconds:60}")
     private long resendCooldownSeconds;
 
+    @Transactional
     public User register(String email, String password, String roleName) {
 
         // cek apakah email sudah ada
@@ -68,6 +72,7 @@ public class AuthService {
 
         User savedUser = userRepository.save(user);
         issueVerificationToken(savedUser, Instant.now(), false);
+        walletProvisioningOutboxService.enqueueWalletProvisionRequested(savedUser);
         authEventPublisher.publishUserRegistered(savedUser);
         return savedUser;
     }
