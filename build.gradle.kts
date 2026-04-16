@@ -3,7 +3,7 @@ plugins {
     id("org.springframework.boot") version "3.5.11"
     id("io.spring.dependency-management") version "1.1.7"
     id("jacoco")
-    id("org.sonarqube") version "4.4.1.3373"
+    id("org.sonarqube") version "6.2.0.5505"
 }
 
 group = "id.ac.ui.cs.advprog"
@@ -97,5 +97,6 @@ sonar {
         property("sonar.projectKey", "advprog-2026-A17-project_bidmart-auth-service")
         property("sonar.organization", "advprog-2026-a17-project")
         property("sonar.host.url", "https://sonarcloud.io")
+        property("sonar.gradle.skipCompile", "true")
     }
 }
