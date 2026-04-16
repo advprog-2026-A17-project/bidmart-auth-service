@@ -4,11 +4,14 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Permission;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.EmailVerificationToken;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -56,6 +59,9 @@ class AuthServiceTest {
 
     @Mock
     private VerificationTokenCodec verificationTokenCodec;
+
+    @Mock
+    private OAuthIdentityVerifier oauthIdentityVerifier;
 
     @InjectMocks
     private AuthService authService;
@@ -391,18 +397,42 @@ class AuthServiceTest {
                 .id(UUID.randomUUID())
                 .name("BUYER")
                 .build();
+        OAuthIdentity identity = new OAuthIdentity(
+                "google-user-1",
+                email,
+                "OAuth User",
+                "https://cdn.example.com/oauth-avatar.png"
+        );
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.empty());
+        when(oauthIdentityVerifier.supports("google")).thenReturn(true);
+        when(oauthIdentityVerifier.verify("google-id-token")).thenReturn(identity);
         when(roleRepository.findByName("BUYER")).thenReturn(Optional.of(buyerRole));
         when(passwordEncoder.encode(anyString())).thenReturn("encoded-oauth-secret");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User user = authService.oauthLogin("google", "google-user-1", email, "OAuth User");
+        User user = authService.oauthLogin("google", "google-id-token");
 
         assertEquals(email, user.getEmail());
         assertTrue(user.isEmailVerified());
         assertEquals("OAuth User", user.getDisplayName());
+        assertEquals("https://cdn.example.com/oauth-avatar.png", user.getAvatarUrl());
+        assertEquals("google", user.getOauthProvider());
+        assertEquals("google-user-1", user.getOauthSubject());
         assertTrue(user.getRoles().contains(buyerRole));
+    }
+
+    @Test
+    void oauthLoginShouldThrowWhenProviderUnsupported() {
+        when(oauthIdentityVerifier.supports("github")).thenReturn(false);
+
+        UnsupportedOAuthProviderException exception = assertThrows(
+                UnsupportedOAuthProviderException.class,
+                () -> authService.oauthLogin("github", "id-token")
+        );
+
+        assertEquals("Unsupported OAuth provider", exception.getMessage());
+        verify(oauthIdentityVerifier, never()).verify(anyString());
     }
 
     @Test
