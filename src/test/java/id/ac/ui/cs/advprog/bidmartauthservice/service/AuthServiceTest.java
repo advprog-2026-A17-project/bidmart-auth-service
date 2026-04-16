@@ -102,6 +102,7 @@ class AuthServiceTest {
         User user = new User();
         user.setEmail(email);
         user.setPassword("encoded-secret");
+        user.setEnabled(true);
         user.setEmailVerified(true);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
@@ -121,6 +122,7 @@ class AuthServiceTest {
         User user = new User();
         user.setEmail(email);
         user.setPassword("encoded-secret");
+        user.setEnabled(true);
         user.setEmailVerified(true);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
@@ -144,11 +146,11 @@ class AuthServiceTest {
         user.setEnabled(false);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
-        when(passwordEncoder.matches(password, "encoded-secret")).thenReturn(true);
 
         Optional<User> result = authService.login(email, password);
 
         assertFalse(result.isPresent());
+        verifyNoInteractions(passwordEncoder);
     }
 
     @Test
@@ -168,6 +170,7 @@ class AuthServiceTest {
         User user = new User();
         user.setEmail(email);
         user.setPassword("encoded-secret");
+        user.setEnabled(true);
         user.setEmailVerified(false);
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));

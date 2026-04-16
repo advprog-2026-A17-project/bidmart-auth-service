@@ -58,8 +58,9 @@ public class AuthService {
 
         Optional<User> userOpt = userRepository.findByEmail(email);
 
-        if (userOpt.isPresent() &&
-                passwordEncoder.matches(password, userOpt.get().getPassword())) {
+        if (userOpt.isPresent()
+                && userOpt.get().isEnabled()
+                && passwordEncoder.matches(password, userOpt.get().getPassword())) {
             if (!userOpt.get().isEmailVerified()) {
                 throw new EmailNotVerifiedException("Email not verified");
             }
