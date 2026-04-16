@@ -2,17 +2,25 @@ package id.ac.ui.cs.advprog.bidmartauthservice.service;
 
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.EmailVerificationToken;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
-
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -23,9 +31,19 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final EmailVerificationTokenRepository emailVerificationTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthEventPublisher authEventPublisher;
     private final LoginEligibilityPolicy loginEligibilityPolicy;
+    private final VerificationEmailSender verificationEmailSender;
+    private final VerificationTokenCodec verificationTokenCodec;
+    private final OAuthIdentityVerifier oauthIdentityVerifier;
+
+    @Value("${app.auth.email-verification.token-ttl-seconds:86400}")
+    private long verificationTokenTtlSeconds;
+
+    @Value("${app.auth.email-verification.resend-cooldown-seconds:60}")
+    private long resendCooldownSeconds;
 
     public User register(String email, String password, String roleName) {
 
@@ -45,12 +63,11 @@ public class AuthService {
                 .password(passwordEncoder.encode(password))
                 .enabled(true)
                 .emailVerified(false)
-                .verificationToken(UUID.randomUUID().toString())
-                .verificationTokenExpiresAt(Instant.now().plusSeconds(86400))
                 .roles(Set.of(role))
                 .build();
 
         User savedUser = userRepository.save(user);
+        issueVerificationToken(savedUser, Instant.now(), false);
         authEventPublisher.publishUserRegistered(savedUser);
         return savedUser;
     }
@@ -85,27 +102,45 @@ public class AuthService {
     }
 
     public boolean verifyEmail(String token) {
-        return userRepository.findByVerificationToken(token)
-                .filter(user -> user.getVerificationTokenExpiresAt() != null &&
-                        user.getVerificationTokenExpiresAt().isAfter(Instant.now()))
-                .map(user -> {
-                    user.setEmailVerified(true);
-                    user.setVerificationToken(null);
-                    user.setVerificationTokenExpiresAt(null);
-                    userRepository.save(user);
-                    authEventPublisher.publishEmailVerified(user);
-                    return true;
-                })
-                .orElse(false);
+        Instant now = Instant.now();
+        String tokenHash = verificationTokenCodec.hashToken(token);
+
+        Optional<EmailVerificationToken> tokenRecord = emailVerificationTokenRepository
+                .findByTokenHashAndUsedAtIsNull(tokenHash);
+        if (tokenRecord.isEmpty()) {
+            return false;
+        }
+
+        EmailVerificationToken verificationToken = tokenRecord.get();
+        if (verificationToken.getExpiresAt() == null || !verificationToken.getExpiresAt().isAfter(now)) {
+            verificationToken.setUsedAt(now);
+            emailVerificationTokenRepository.save(verificationToken);
+            return false;
+        }
+
+        User user = verificationToken.getUser();
+        if (user == null || user.isEmailVerified()) {
+            verificationToken.setUsedAt(now);
+            emailVerificationTokenRepository.save(verificationToken);
+            return false;
+        }
+
+        user.setEmailVerified(true);
+        userRepository.save(user);
+
+        verificationToken.setUsedAt(now);
+        emailVerificationTokenRepository.save(verificationToken);
+        invalidateActiveTokens(user, now);
+
+        authEventPublisher.publishEmailVerified(user);
+        return true;
     }
 
     public void resendVerification(String email) {
         userRepository.findByEmail(email)
                 .filter(user -> !user.isEmailVerified())
                 .ifPresent(user -> {
-                    user.setVerificationToken(UUID.randomUUID().toString());
-                    user.setVerificationTokenExpiresAt(Instant.now().plusSeconds(86400));
-                    userRepository.save(user);
+                    issueVerificationToken(user, Instant.now(), true);
                 });
     }
 
@@ -118,10 +153,16 @@ public class AuthService {
         });
     }
 
-    public User oauthLogin(String provider, String providerUserId, String email, String displayName) {
-        Optional<User> existingUser = userRepository.findByEmail(email);
+    public User oauthLogin(String provider, String idToken) {
+        if (!oauthIdentityVerifier.supports(provider)) {
+            throw new UnsupportedOAuthProviderException("Unsupported OAuth provider");
+        }
+
+        OAuthIdentity identity = oauthIdentityVerifier.verify(idToken);
+        Optional<User> existingUser = userRepository.findByEmail(identity.email());
+
         if (existingUser.isPresent()) {
-            return existingUser.get();
+            return updateExistingOAuthUser(existingUser.get(), provider, identity);
         }
 
         Role buyerRole = roleRepository.findByName("BUYER")
@@ -132,19 +173,50 @@ public class AuthService {
 
         User user = User.builder()
                 .id(UUID.randomUUID())
-                .email(email)
+                .email(identity.email())
                 .password(passwordEncoder.encode(UUID.randomUUID().toString()))
                 .enabled(true)
                 .emailVerified(true)
                 .verificationToken(null)
                 .verificationTokenExpiresAt(null)
-                .oauthProvider(provider)
-                .oauthSubject(providerUserId)
-                .displayName(displayName)
+                .oauthProvider(provider.toLowerCase(Locale.ROOT))
+                .oauthSubject(identity.subject())
+                .displayName(identity.displayName())
+                .avatarUrl(identity.avatarUrl())
                 .roles(Set.of(buyerRole))
                 .build();
 
         return userRepository.save(user);
+    }
+
+    private User updateExistingOAuthUser(User existingUser, String provider, OAuthIdentity identity) {
+        boolean oauthAlreadyLinked = !isBlank(existingUser.getOauthProvider())
+                || !isBlank(existingUser.getOauthSubject());
+        if (oauthAlreadyLinked && !isMatchingOauthIdentity(existingUser, provider, identity)) {
+            throw new InvalidOAuthTokenException("Google account is not linked to this user");
+        }
+
+        existingUser.setOauthProvider(provider.toLowerCase(Locale.ROOT));
+        existingUser.setOauthSubject(identity.subject());
+        existingUser.setEmailVerified(true);
+
+        if (isBlank(existingUser.getDisplayName())) {
+            existingUser.setDisplayName(identity.displayName());
+        }
+        if (isBlank(existingUser.getAvatarUrl())) {
+            existingUser.setAvatarUrl(identity.avatarUrl());
+        }
+
+        return userRepository.save(existingUser);
+    }
+
+    private boolean isMatchingOauthIdentity(User user, String provider, OAuthIdentity identity) {
+        return provider.equalsIgnoreCase(user.getOauthProvider())
+                && identity.subject().equals(user.getOauthSubject());
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     public boolean hasPermission(String email, String permissionName) {
@@ -155,5 +227,42 @@ public class AuthService {
                                 : role.getPermissions().stream())
                         .anyMatch(permission -> permissionName.equals(permission.getName())))
                 .orElse(false);
+    }
+
+    private void issueVerificationToken(User user, Instant now, boolean enforceCooldown) {
+        if (enforceCooldown && isWithinCooldownWindow(user, now)) {
+            return;
+        }
+
+        invalidateActiveTokens(user, now);
+
+        String rawToken = verificationTokenCodec.generateRawToken();
+        EmailVerificationToken token = EmailVerificationToken.builder()
+                .id(UUID.randomUUID())
+                .user(user)
+                .tokenHash(verificationTokenCodec.hashToken(rawToken))
+                .expiresAt(now.plusSeconds(verificationTokenTtlSeconds))
+                .createdAt(now)
+                .lastSentAt(now)
+                .build();
+
+        emailVerificationTokenRepository.save(token);
+        verificationEmailSender.sendVerificationEmail(user, rawToken);
+    }
+
+    private boolean isWithinCooldownWindow(User user, Instant now) {
+        return emailVerificationTokenRepository
+                .findFirstByUserAndUsedAtIsNullOrderByCreatedAtDesc(user)
+                .map(token -> token.getLastSentAt() != null
+                        && token.getLastSentAt().isAfter(now.minusSeconds(resendCooldownSeconds)))
+                .orElse(false);
+    }
+
+    private void invalidateActiveTokens(User user, Instant now) {
+        List<EmailVerificationToken> activeTokens = emailVerificationTokenRepository.findByUserAndUsedAtIsNull(user);
+        for (EmailVerificationToken activeToken : activeTokens) {
+            activeToken.setUsedAt(now);
+            emailVerificationTokenRepository.save(activeToken);
+        }
     }
 }

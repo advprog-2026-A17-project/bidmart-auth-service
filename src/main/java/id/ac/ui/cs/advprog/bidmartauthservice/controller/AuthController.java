@@ -126,9 +126,7 @@ public class AuthController {
     public ResponseEntity<?> oauthLogin(@Valid @RequestBody OAuthLoginRequest request) {
         User user = authService.oauthLogin(
                 request.provider(),
-                request.providerUserId(),
-                request.email(),
-                request.displayName()
+                request.idToken()
         );
         return ResponseEntity.ok(tokenService.issueTokens(user));
     }

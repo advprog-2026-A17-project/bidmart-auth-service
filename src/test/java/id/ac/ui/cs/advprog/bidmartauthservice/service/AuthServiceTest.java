@@ -3,18 +3,28 @@ package id.ac.ui.cs.advprog.bidmartauthservice.service;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Permission;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.EmailVerificationToken;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -33,6 +43,9 @@ class AuthServiceTest {
     private RoleRepository roleRepository;
 
     @Mock
+    private EmailVerificationTokenRepository emailVerificationTokenRepository;
+
+    @Mock
     private PasswordEncoder passwordEncoder;
 
     @Mock
@@ -40,6 +53,15 @@ class AuthServiceTest {
 
     @Mock
     private LoginEligibilityPolicy loginEligibilityPolicy;
+
+    @Mock
+    private VerificationEmailSender verificationEmailSender;
+
+    @Mock
+    private VerificationTokenCodec verificationTokenCodec;
+
+    @Mock
+    private OAuthIdentityVerifier oauthIdentityVerifier;
 
     @InjectMocks
     private AuthService authService;
@@ -58,7 +80,13 @@ class AuthServiceTest {
         when(userRepository.findByEmail(email)).thenReturn(Optional.empty());
         when(roleRepository.findByName(roleName)).thenReturn(Optional.of(role));
         when(passwordEncoder.encode(password)).thenReturn("encoded-pass");
+        when(verificationTokenCodec.generateRawToken()).thenReturn("raw-register-token");
+        when(verificationTokenCodec.hashToken("raw-register-token")).thenReturn("a".repeat(64));
         when(userRepository.save(any(User.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(emailVerificationTokenRepository.findByUserAndUsedAtIsNull(any(User.class)))
+                .thenReturn(java.util.List.of());
+        when(emailVerificationTokenRepository.save(any(EmailVerificationToken.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         User saved = authService.register(email, password, roleName);
@@ -69,10 +97,19 @@ class AuthServiceTest {
         assertEquals("encoded-pass", saved.getPassword());
         assertTrue(saved.isEnabled());
         assertFalse(saved.isEmailVerified());
-        assertNotNull(saved.getVerificationToken());
-        assertNotNull(saved.getVerificationTokenExpiresAt());
+        assertNull(saved.getVerificationToken());
+        assertNull(saved.getVerificationTokenExpiresAt());
         assertNotNull(saved.getRoles());
         assertTrue(saved.getRoles().contains(role));
+
+        ArgumentCaptor<EmailVerificationToken> tokenCaptor = ArgumentCaptor.forClass(EmailVerificationToken.class);
+        ArgumentCaptor<String> rawTokenCaptor = ArgumentCaptor.forClass(String.class);
+        verify(emailVerificationTokenRepository).save(tokenCaptor.capture());
+        verify(verificationEmailSender).sendVerificationEmail(eq(saved), rawTokenCaptor.capture());
+        assertEquals(64, tokenCaptor.getValue().getTokenHash().length());
+        assertNotEquals(tokenCaptor.getValue().getTokenHash(), rawTokenCaptor.getValue());
+        assertNotNull(tokenCaptor.getValue().getExpiresAt());
+
         verify(userRepository).findByEmail(email);
         verify(roleRepository).findByName(roleName);
         verify(passwordEncoder).encode(password);
@@ -253,25 +290,85 @@ class AuthServiceTest {
 
     @Test
     void verifyEmailShouldMarkUserVerifiedWhenTokenValid() {
-        String token = UUID.randomUUID().toString();
+        String token = "raw-verification-token";
+        String tokenHash = sha256Hex(token);
+        when(verificationTokenCodec.hashToken(token)).thenReturn(tokenHash);
         User user = User.builder()
                 .id(UUID.randomUUID())
                 .email("verify@test.com")
-                .verificationToken(token)
-                .verificationTokenExpiresAt(java.time.Instant.now().plusSeconds(600))
                 .emailVerified(false)
                 .build();
+        EmailVerificationToken verificationToken = EmailVerificationToken.builder()
+                .id(UUID.randomUUID())
+                .user(user)
+                .tokenHash(tokenHash)
+                .expiresAt(Instant.now().plusSeconds(600))
+                .build();
 
-        when(userRepository.findByVerificationToken(token)).thenReturn(Optional.of(user));
+        when(emailVerificationTokenRepository.findByTokenHashAndUsedAtIsNull(tokenHash))
+                .thenReturn(Optional.of(verificationToken));
+        when(emailVerificationTokenRepository.findByUserAndUsedAtIsNull(user))
+                .thenReturn(java.util.List.of(verificationToken));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(emailVerificationTokenRepository.save(any(EmailVerificationToken.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         boolean verified = authService.verifyEmail(token);
 
         assertTrue(verified);
         assertTrue(user.isEmailVerified());
-        assertNull(user.getVerificationToken());
-        assertNull(user.getVerificationTokenExpiresAt());
+        assertNotNull(verificationToken.getUsedAt());
         verify(authEventPublisher).publishEmailVerified(user);
+    }
+
+    @Test
+    void verifyEmailShouldReturnFalseWhenTokenInvalid() {
+        String token = "unknown-token";
+        when(verificationTokenCodec.hashToken(token)).thenReturn(sha256Hex(token));
+        when(emailVerificationTokenRepository.findByTokenHashAndUsedAtIsNull(sha256Hex(token)))
+                .thenReturn(Optional.empty());
+
+        boolean verified = authService.verifyEmail(token);
+
+        assertFalse(verified);
+        verify(userRepository, never()).save(any(User.class));
+        verify(authEventPublisher, never()).publishEmailVerified(any(User.class));
+    }
+
+    @Test
+    void resendVerificationShouldRotateTokenAndSendEmailForUnverifiedUser() {
+        String email = "buyer@test.com";
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email(email)
+                .emailVerified(false)
+                .enabled(true)
+                .build();
+
+        EmailVerificationToken existingToken = EmailVerificationToken.builder()
+                .id(UUID.randomUUID())
+                .user(user)
+                .tokenHash("oldhash")
+                .expiresAt(Instant.now().plusSeconds(600))
+                .lastSentAt(Instant.now().minusSeconds(300))
+                .build();
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(emailVerificationTokenRepository.findFirstByUserAndUsedAtIsNullOrderByCreatedAtDesc(user))
+                .thenReturn(Optional.of(existingToken));
+        when(emailVerificationTokenRepository.findByUserAndUsedAtIsNull(user))
+                .thenReturn(java.util.List.of(existingToken));
+        when(verificationTokenCodec.generateRawToken()).thenReturn("raw-resend-token");
+        when(verificationTokenCodec.hashToken("raw-resend-token")).thenReturn("b".repeat(64));
+        when(emailVerificationTokenRepository.save(any(EmailVerificationToken.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        authService.resendVerification(email);
+
+        ArgumentCaptor<String> rawTokenCaptor = ArgumentCaptor.forClass(String.class);
+        verify(verificationEmailSender).sendVerificationEmail(eq(user), rawTokenCaptor.capture());
+        verify(emailVerificationTokenRepository, times(2)).save(any(EmailVerificationToken.class));
+        assertNotNull(rawTokenCaptor.getValue());
     }
 
     @Test
@@ -300,18 +397,42 @@ class AuthServiceTest {
                 .id(UUID.randomUUID())
                 .name("BUYER")
                 .build();
+        OAuthIdentity identity = new OAuthIdentity(
+                "google-user-1",
+                email,
+                "OAuth User",
+                "https://cdn.example.com/oauth-avatar.png"
+        );
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.empty());
+        when(oauthIdentityVerifier.supports("google")).thenReturn(true);
+        when(oauthIdentityVerifier.verify("google-id-token")).thenReturn(identity);
         when(roleRepository.findByName("BUYER")).thenReturn(Optional.of(buyerRole));
         when(passwordEncoder.encode(anyString())).thenReturn("encoded-oauth-secret");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User user = authService.oauthLogin("google", "google-user-1", email, "OAuth User");
+        User user = authService.oauthLogin("google", "google-id-token");
 
         assertEquals(email, user.getEmail());
         assertTrue(user.isEmailVerified());
         assertEquals("OAuth User", user.getDisplayName());
+        assertEquals("https://cdn.example.com/oauth-avatar.png", user.getAvatarUrl());
+        assertEquals("google", user.getOauthProvider());
+        assertEquals("google-user-1", user.getOauthSubject());
         assertTrue(user.getRoles().contains(buyerRole));
+    }
+
+    @Test
+    void oauthLoginShouldThrowWhenProviderUnsupported() {
+        when(oauthIdentityVerifier.supports("github")).thenReturn(false);
+
+        UnsupportedOAuthProviderException exception = assertThrows(
+                UnsupportedOAuthProviderException.class,
+                () -> authService.oauthLogin("github", "id-token")
+        );
+
+        assertEquals("Unsupported OAuth provider", exception.getMessage());
+        verify(oauthIdentityVerifier, never()).verify(anyString());
     }
 
     @Test
@@ -335,5 +456,19 @@ class AuthServiceTest {
 
         assertTrue(authService.hasPermission("rbac@test.com", "bid:place"));
         assertFalse(authService.hasPermission("rbac@test.com", "auction:create"));
+    }
+
+    private String sha256Hex(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder();
+            for (byte value : bytes) {
+                builder.append(String.format("%02x", value));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 not available", ex);
+        }
     }
 }
