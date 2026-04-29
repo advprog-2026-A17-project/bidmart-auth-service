@@ -12,6 +12,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.repository.PermissionRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.provisioning.WalletProvisioningOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.PasswordPolicy;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
 import org.junit.jupiter.api.Tag;
@@ -63,6 +64,9 @@ class AuthServiceTest {
 
     @Mock
     private LoginEligibilityPolicy loginEligibilityPolicy;
+
+    @Mock
+    private PasswordPolicy passwordPolicy;
 
     @Mock
     private VerificationEmailSender verificationEmailSender;
@@ -166,6 +170,7 @@ class AuthServiceTest {
         assertNotNull(tokenCaptor.getValue().getExpiresAt());
 
         verify(userRepository).findByEmail(email);
+        verify(passwordPolicy).validate(password);
         verify(roleRepository).findByName(roleName);
         verify(passwordEncoder).encode(password);
         verify(userRepository).save(any(User.class));
@@ -188,6 +193,26 @@ class AuthServiceTest {
         assertEquals("Email already registered", exception.getMessage());
         verify(userRepository).findByEmail(email);
         verify(roleRepository, never()).findByName(anyString());
+        verify(userRepository, never()).save(any(User.class));
+        verify(walletProvisioningOutboxService, never()).enqueueWalletProvisionRequested(any(User.class));
+    }
+
+    @Test
+    void registerShouldRejectPasswordThatViolatesPolicy() {
+        String email = "service@test.com";
+        String password = "weak";
+
+        doThrow(new IllegalArgumentException("Password does not meet policy"))
+                .when(passwordPolicy).validate(password);
+
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> authService.register(email, password, "BUYER")
+        );
+
+        assertEquals("Password does not meet policy", exception.getMessage());
+        verify(passwordPolicy).validate(password);
+        verify(userRepository, never()).findByEmail(anyString());
         verify(userRepository, never()).save(any(User.class));
         verify(walletProvisioningOutboxService, never()).enqueueWalletProvisionRequested(any(User.class));
     }
