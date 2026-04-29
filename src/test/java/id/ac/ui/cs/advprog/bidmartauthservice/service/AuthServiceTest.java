@@ -11,6 +11,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenR
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.PermissionRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.provisioning.WalletProvisioningOutboxService;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.PasswordPolicy;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
@@ -79,6 +80,9 @@ class AuthServiceTest {
 
     @Mock
     private WalletProvisioningOutboxService walletProvisioningOutboxService;
+
+    @Mock
+    private AuthAuditOutboxService authAuditOutboxService;
 
     @Spy
     private TwoFactorTotpService twoFactorTotpService = new TwoFactorTotpService();
@@ -400,6 +404,7 @@ class AuthServiceTest {
         assertTrue(role.getPermissions().stream().anyMatch(permission -> "auction:close".equals(permission.getName())));
         verify(roleRepository).save(any(Role.class));
         verify(permissionRepository).save(any(Permission.class));
+        verify(authAuditOutboxService).enqueueRoleCreated(role);
     }
 
     @Test
@@ -421,6 +426,7 @@ class AuthServiceTest {
         assertTrue(updated.isPresent());
         assertEquals(Set.of(seller), updated.get().getRoles());
         verify(userRepository).save(user);
+        verify(authAuditOutboxService).enqueueUserRoleChanged(user, seller);
     }
 
     @Test
@@ -564,6 +570,7 @@ class AuthServiceTest {
         assertFalse(disabled.get().isEnabled());
         verify(userRepository).save(user);
         verify(authEventPublisher).publishUserDisabled(user);
+        verify(authAuditOutboxService).enqueueUserDisabled(user);
     }
 
     @Test

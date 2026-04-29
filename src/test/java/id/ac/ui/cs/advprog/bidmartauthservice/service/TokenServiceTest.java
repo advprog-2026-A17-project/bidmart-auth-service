@@ -6,6 +6,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,9 @@ class TokenServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private AuthAuditOutboxService authAuditOutboxService;
 
     @InjectMocks
     private TokenService tokenService;
@@ -170,6 +174,7 @@ class TokenServiceTest {
 
         assertTrue(session.isRevoked());
         verify(refreshTokenRepository).save(session);
+        verify(authAuditOutboxService).enqueueSessionRevoked(session);
     }
 
     @Test
