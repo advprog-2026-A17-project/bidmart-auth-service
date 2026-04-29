@@ -32,7 +32,9 @@ import java.util.UUID;
 import java.util.List;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -434,5 +436,92 @@ class AuthControllerTest {
                         .param("permission", "bid:place"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.allowed").value(true));
+    }
+
+    @Test
+    void setupTwoFactorShouldReturnSecretAndQrCodeUrl() throws Exception {
+        when(authService.setupTwoFactor("buyer@test.com"))
+                .thenReturn(new id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorSetupResponse(
+                        "JBSWY3DPEHPK3PXP",
+                        "otpauth://totp/BidMart:buyer@test.com?secret=JBSWY3DPEHPK3PXP&issuer=BidMart"
+                ));
+
+        mockMvc.perform(post("/api/v1/auth/2fa/setup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"buyer@test.com\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.secret").value("JBSWY3DPEHPK3PXP"))
+                .andExpect(jsonPath("$.qrCodeUrl").value("otpauth://totp/BidMart:buyer@test.com?secret=JBSWY3DPEHPK3PXP&issuer=BidMart"));
+    }
+
+    @Test
+    void verifyTwoFactorShouldActivateFeature() throws Exception {
+        when(authService.verifyTwoFactor("buyer@test.com", "123456")).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/auth/2fa/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"buyer@test.com\",\"code\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true));
+    }
+
+    @Test
+    void disableTwoFactorShouldTurnOffFeature() throws Exception {
+        when(authService.disableTwoFactor("buyer@test.com", "123456")).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/auth/2fa/disable")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"buyer@test.com\",\"code\":\"123456\"}"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void createRoleShouldReturnRoleWithPermissions() throws Exception {
+        Permission bidPlace = Permission.builder().id(UUID.randomUUID()).name("bid:place").build();
+        Role bidder = Role.builder()
+                .id(UUID.randomUUID())
+                .name("BIDDER")
+                .permissions(Set.of(bidPlace))
+                .build();
+
+        when(authService.createRole("BIDDER", List.of("bid:place"))).thenReturn(bidder);
+
+        mockMvc.perform(post("/api/v1/auth/roles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"BIDDER\",\"permissions\":[\"bid:place\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("BIDDER"))
+                .andExpect(jsonPath("$.permissions[0]").value("bid:place"));
+    }
+
+    @Test
+    void assignUserRoleShouldReturnUpdatedUser() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Role sellerRole = Role.builder().id(UUID.randomUUID()).name("SELLER").build();
+        User user = User.builder()
+                .id(userId)
+                .email("seller@test.com")
+                .enabled(true)
+                .roles(Set.of(sellerRole))
+                .build();
+
+        when(authService.assignUserRole(userId, "SELLER")).thenReturn(Optional.of(user));
+
+        mockMvc.perform(put("/api/v1/auth/users/{userId}/roles", userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"role\":\"SELLER\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("seller@test.com"))
+                .andExpect(jsonPath("$.roles[0].name").value("SELLER"));
+    }
+
+    @Test
+    void revokeSessionShouldReturnNoContent() throws Exception {
+        UUID sessionId = UUID.randomUUID();
+
+        mockMvc.perform(delete("/api/v1/auth/sessions/{sessionId}", sessionId))
+                .andExpect(status().isNoContent());
+
+        verify(tokenService).revokeSessionByTokenId(sessionId);
     }
 }

@@ -8,6 +8,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProvider
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.PermissionRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.provisioning.WalletProvisioningOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
@@ -23,12 +24,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -42,6 +48,9 @@ class AuthServiceTest {
 
     @Mock
     private RoleRepository roleRepository;
+
+    @Mock
+    private PermissionRepository permissionRepository;
 
     @Mock
     private EmailVerificationTokenRepository emailVerificationTokenRepository;
@@ -69,6 +78,28 @@ class AuthServiceTest {
 
     @InjectMocks
     private AuthService authService;
+
+    private static String currentTotp(String base32Secret) {
+        try {
+            byte[] key = Base64.getDecoder().decode("IFBEGRCFIZDUQSKKJNGE2TSPKBIVEU2UKVLFOWCZ");
+            if (!"JBSWY3DPEHPK3PXP".equals(base32Secret)) {
+                throw new IllegalArgumentException("Unsupported test secret");
+            }
+            long counter = Instant.now().getEpochSecond() / 30L;
+            byte[] counterBytes = ByteBuffer.allocate(Long.BYTES).putLong(counter).array();
+            Mac mac = Mac.getInstance("HmacSHA1");
+            mac.init(new SecretKeySpec(key, "HmacSHA1"));
+            byte[] hash = mac.doFinal(counterBytes);
+            int offset = hash[hash.length - 1] & 0x0f;
+            int binary = ((hash[offset] & 0x7f) << 24)
+                    | ((hash[offset + 1] & 0xff) << 16)
+                    | ((hash[offset + 2] & 0xff) << 8)
+                    | (hash[offset + 3] & 0xff);
+            return String.format("%06d", binary % 1_000_000);
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
 
     @Test
     void registerShouldSaveEnabledUserWhenEmailIsAvailable() {
@@ -251,6 +282,100 @@ class AuthServiceTest {
 
         assertTrue(result.isPresent());
         assertEquals(email, result.get().getEmail());
+    }
+
+    @Test
+    void setupTwoFactorShouldPersistSecretAndReturnQrCodeUrl() {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("buyer@test.com")
+                .build();
+        when(userRepository.findByEmail("buyer@test.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = authService.setupTwoFactor("buyer@test.com");
+
+        assertNotNull(response.secret());
+        assertTrue(response.qrCodeUrl().startsWith("otpauth://totp/BidMart:buyer@test.com"));
+        assertEquals(response.secret(), user.getTwoFactorSecret());
+        assertFalse(user.isTwoFactorEnabled());
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void verifyTwoFactorShouldEnableFeatureWhenCodeIsValid() {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("buyer@test.com")
+                .twoFactorSecret("JBSWY3DPEHPK3PXP")
+                .twoFactorEnabled(false)
+                .build();
+        when(userRepository.findByEmail("buyer@test.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        boolean verified = authService.verifyTwoFactor("buyer@test.com", currentTotp("JBSWY3DPEHPK3PXP"));
+
+        assertTrue(verified);
+        assertTrue(user.isTwoFactorEnabled());
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void disableTwoFactorShouldClearSecretWhenCodeIsValid() {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("buyer@test.com")
+                .twoFactorSecret("JBSWY3DPEHPK3PXP")
+                .twoFactorEnabled(true)
+                .build();
+        when(userRepository.findByEmail("buyer@test.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        boolean disabled = authService.disableTwoFactor("buyer@test.com", currentTotp("JBSWY3DPEHPK3PXP"));
+
+        assertTrue(disabled);
+        assertFalse(user.isTwoFactorEnabled());
+        assertNull(user.getTwoFactorSecret());
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void createRoleShouldReuseExistingPermissionsAndCreateMissingPermissions() {
+        Permission existing = Permission.builder().id(UUID.randomUUID()).name("bid:place").build();
+        when(permissionRepository.findByName("bid:place")).thenReturn(Optional.of(existing));
+        when(permissionRepository.findByName("auction:close")).thenReturn(Optional.empty());
+        when(permissionRepository.save(any(Permission.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(roleRepository.save(any(Role.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Role role = authService.createRole("AUCTION_MANAGER", java.util.List.of("bid:place", "auction:close"));
+
+        assertEquals("AUCTION_MANAGER", role.getName());
+        assertEquals(2, role.getPermissions().size());
+        assertTrue(role.getPermissions().stream().anyMatch(permission -> "bid:place".equals(permission.getName())));
+        assertTrue(role.getPermissions().stream().anyMatch(permission -> "auction:close".equals(permission.getName())));
+        verify(roleRepository).save(any(Role.class));
+        verify(permissionRepository).save(any(Permission.class));
+    }
+
+    @Test
+    void assignUserRoleShouldReplaceExistingRoles() {
+        UUID userId = UUID.randomUUID();
+        Role buyer = Role.builder().id(UUID.randomUUID()).name("BUYER").build();
+        Role seller = Role.builder().id(UUID.randomUUID()).name("SELLER").build();
+        User user = User.builder()
+                .id(userId)
+                .email("seller@test.com")
+                .roles(Set.of(buyer))
+                .build();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(roleRepository.findByName("SELLER")).thenReturn(Optional.of(seller));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<User> updated = authService.assignUserRole(userId, "SELLER");
+
+        assertTrue(updated.isPresent());
+        assertEquals(Set.of(seller), updated.get().getRoles());
+        verify(userRepository).save(user);
     }
 
     @Test
