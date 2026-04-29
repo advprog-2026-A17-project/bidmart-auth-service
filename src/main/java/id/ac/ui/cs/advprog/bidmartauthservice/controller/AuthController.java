@@ -137,6 +137,7 @@ public class AuthController {
     }
 
     @PostMapping("/admin/disable-user")
+    @id.ac.ui.cs.advprog.bidmartauthservice.annotation.RequirePermission("admin:users")
     public ResponseEntity<Void> disableUser(@RequestParam String email) {
         return authService.disableUser(email).map(user -> {
             tokenService.revokeAllSessionsForUser(user.getId());
@@ -185,11 +186,13 @@ public class AuthController {
     }
 
     @PostMapping("/roles")
+    @id.ac.ui.cs.advprog.bidmartauthservice.annotation.RequirePermission("admin:roles")
     public ResponseEntity<RoleResponse> createRole(@Valid @RequestBody CreateRoleRequest request) {
         return ResponseEntity.ok(RoleResponse.fromRole(authService.createRole(request.name(), request.permissions())));
     }
 
     @PutMapping("/users/{userId}/roles")
+    @id.ac.ui.cs.advprog.bidmartauthservice.annotation.RequirePermission("admin:roles")
     public ResponseEntity<?> assignUserRole(
             @PathVariable UUID userId,
             @Valid @RequestBody AssignRoleRequest request
