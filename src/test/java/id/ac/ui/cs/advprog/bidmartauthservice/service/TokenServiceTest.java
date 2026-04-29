@@ -171,4 +171,44 @@ class TokenServiceTest {
         assertTrue(session.isRevoked());
         verify(refreshTokenRepository).save(session);
     }
+
+    @Test
+    void generateRefreshTokenShouldRevokeOldestSessionWhenLimitReached() {
+        ReflectionTestUtils.setField(tokenService, "maxConcurrentSessions", 2);
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("token@test.com")
+                .enabled(true)
+                .roles(Set.of(Role.builder().id(UUID.randomUUID()).name("BUYER").build()))
+                .build();
+        RefreshToken oldestSession = RefreshToken.builder()
+                .id(UUID.randomUUID())
+                .tokenId(UUID.randomUUID())
+                .user(user)
+                .expiresAt(Instant.now().plusSeconds(1800))
+                .revoked(false)
+                .createdAt(Instant.now().minusSeconds(120))
+                .build();
+        RefreshToken newestSession = RefreshToken.builder()
+                .id(UUID.randomUUID())
+                .tokenId(UUID.randomUUID())
+                .user(user)
+                .expiresAt(Instant.now().plusSeconds(1800))
+                .revoked(false)
+                .createdAt(Instant.now().minusSeconds(60))
+                .build();
+
+        when(refreshTokenRepository.findByUserIdAndRevokedFalse(user.getId()))
+                .thenReturn(List.of(newestSession, oldestSession));
+        when(refreshTokenRepository.save(any(RefreshToken.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        TokenResponse response = tokenService.generateRefreshToken(user);
+
+        assertNotNull(response.refreshToken());
+        assertTrue(oldestSession.isRevoked());
+        assertFalse(newestSession.isRevoked());
+        verify(refreshTokenRepository).save(oldestSession);
+        verify(refreshTokenRepository, times(2)).save(any(RefreshToken.class));
+    }
 }
