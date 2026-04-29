@@ -14,6 +14,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.Permission;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;

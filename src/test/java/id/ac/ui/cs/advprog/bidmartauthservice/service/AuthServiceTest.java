@@ -28,7 +28,6 @@ import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -81,10 +80,7 @@ class AuthServiceTest {
 
     private static String currentTotp(String base32Secret) {
         try {
-            byte[] key = Base64.getDecoder().decode("IFBEGRCFIZDUQSKKJNGE2TSPKBIVEU2UKVLFOWCZ");
-            if (!"JBSWY3DPEHPK3PXP".equals(base32Secret)) {
-                throw new IllegalArgumentException("Unsupported test secret");
-            }
+            byte[] key = decodeBase32(base32Secret);
             long counter = Instant.now().getEpochSecond() / 30L;
             byte[] counterBytes = ByteBuffer.allocate(Long.BYTES).putLong(counter).array();
             Mac mac = Mac.getInstance("HmacSHA1");
@@ -99,6 +95,26 @@ class AuthServiceTest {
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    private static byte[] decodeBase32(String value) {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        int buffer = 0;
+        int bitsLeft = 0;
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        for (char character : value.toUpperCase(java.util.Locale.ROOT).toCharArray()) {
+            int index = alphabet.indexOf(character);
+            if (index < 0) {
+                throw new IllegalArgumentException("Invalid base32 secret");
+            }
+            buffer = (buffer << 5) | index;
+            bitsLeft += 5;
+            if (bitsLeft >= 8) {
+                output.write((buffer >> (bitsLeft - 8)) & 0xff);
+                bitsLeft -= 8;
+            }
+        }
+        return output.toByteArray();
     }
 
     @Test

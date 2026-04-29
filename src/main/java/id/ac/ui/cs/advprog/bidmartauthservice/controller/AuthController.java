@@ -1,11 +1,16 @@
 package id.ac.ui.cs.advprog.bidmartauthservice.controller;
 
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.AssignRoleRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.CreateRoleRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.LoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.AuthUserResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.OAuthLoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RefreshTokenRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.RoleResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorEmailRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorVerifyRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UserProfileResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
@@ -18,6 +23,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Optional;
+import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -137,5 +144,50 @@ public class AuthController {
             @RequestParam String permission
     ) {
         return ResponseEntity.ok(java.util.Map.of("allowed", authService.hasPermission(email, permission)));
+    }
+
+    @PostMapping("/2fa/setup")
+    public ResponseEntity<?> setupTwoFactor(@Valid @RequestBody TwoFactorEmailRequest request) {
+        return ResponseEntity.ok(authService.setupTwoFactor(request.email()));
+    }
+
+    @PostMapping("/2fa/verify")
+    public ResponseEntity<?> verifyTwoFactor(@Valid @RequestBody TwoFactorVerifyRequest request) {
+        boolean enabled = authService.verifyTwoFactor(request.email(), request.code());
+        if (!enabled) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Invalid two factor code"));
+        }
+        return ResponseEntity.ok(Map.of("enabled", true));
+    }
+
+    @PostMapping("/2fa/disable")
+    public ResponseEntity<?> disableTwoFactor(@Valid @RequestBody TwoFactorVerifyRequest request) {
+        boolean disabled = authService.disableTwoFactor(request.email(), request.code());
+        if (!disabled) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Invalid two factor code"));
+        }
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/roles")
+    public ResponseEntity<RoleResponse> createRole(@Valid @RequestBody CreateRoleRequest request) {
+        return ResponseEntity.ok(RoleResponse.fromRole(authService.createRole(request.name(), request.permissions())));
+    }
+
+    @PutMapping("/users/{userId}/roles")
+    public ResponseEntity<?> assignUserRole(
+            @PathVariable UUID userId,
+            @Valid @RequestBody AssignRoleRequest request
+    ) {
+        return authService.assignUserRole(userId, request.role())
+                .map(AuthUserResponse::fromUser)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @DeleteMapping("/sessions/{sessionId}")
+    public ResponseEntity<Void> revokeSession(@PathVariable UUID sessionId) {
+        tokenService.revokeSessionByTokenId(sessionId);
+        return ResponseEntity.noContent().build();
     }
 }
