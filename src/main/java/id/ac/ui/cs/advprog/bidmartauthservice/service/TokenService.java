@@ -12,6 +12,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.TwoFactorChallengeRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -40,6 +41,7 @@ public class TokenService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final TwoFactorChallengeRepository twoFactorChallengeRepository;
     private final UserRepository userRepository;
+    private final AuthAuditOutboxService authAuditOutboxService;
 
     @Value("${app.auth.jwt.access-ttl-seconds:900}")
     private long accessTokenExpirySeconds;
@@ -56,10 +58,12 @@ public class TokenService {
     public TokenService(
             RefreshTokenRepository refreshTokenRepository,
             TwoFactorChallengeRepository twoFactorChallengeRepository,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            AuthAuditOutboxService authAuditOutboxService) {
         this.refreshTokenRepository = refreshTokenRepository;
         this.twoFactorChallengeRepository = twoFactorChallengeRepository;
         this.userRepository = userRepository;
+        this.authAuditOutboxService = authAuditOutboxService;
     }
 
     public TokenResponse issueTokens(User user) {
@@ -182,6 +186,7 @@ public class TokenService {
         refreshTokenRepository.findByTokenIdAndRevokedFalse(tokenId).ifPresent(token -> {
             token.setRevoked(true);
             refreshTokenRepository.save(token);
+            authAuditOutboxService.enqueueSessionRevoked(token);
         });
     }
 

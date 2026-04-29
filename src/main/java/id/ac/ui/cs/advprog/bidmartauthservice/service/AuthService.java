@@ -14,6 +14,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.PasswordPolicy;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
@@ -49,6 +50,7 @@ public class AuthService {
     private final OAuthIdentityVerifier oauthIdentityVerifier;
     private final WalletProvisioningOutboxService walletProvisioningOutboxService;
     private final TwoFactorTotpService twoFactorTotpService;
+    private final AuthAuditOutboxService authAuditOutboxService;
 
     @Value("${app.auth.email-verification.token-ttl-seconds:86400}")
     private long verificationTokenTtlSeconds;
@@ -163,6 +165,7 @@ public class AuthService {
             user.setEnabled(false);
             User savedUser = userRepository.save(user);
             authEventPublisher.publishUserDisabled(savedUser);
+            authAuditOutboxService.enqueueUserDisabled(savedUser);
             return savedUser;
         });
     }
@@ -304,7 +307,9 @@ public class AuthService {
                 .name(roleName.trim().toUpperCase(Locale.ROOT))
                 .permissions(permissions)
                 .build();
-        return roleRepository.save(role);
+        Role savedRole = roleRepository.save(role);
+        authAuditOutboxService.enqueueRoleCreated(savedRole);
+        return savedRole;
     }
 
     @Transactional
@@ -318,7 +323,9 @@ public class AuthService {
                 .orElseThrow(() -> new RoleNotFoundException("Role not found"));
         User updatedUser = user.get();
         updatedUser.setRoles(Set.of(role));
-        return Optional.of(userRepository.save(updatedUser));
+        User savedUser = userRepository.save(updatedUser);
+        authAuditOutboxService.enqueueUserRoleChanged(savedUser, role);
+        return Optional.of(savedUser);
     }
 
     private void issueVerificationToken(User user, Instant now, boolean enforceCooldown) {
