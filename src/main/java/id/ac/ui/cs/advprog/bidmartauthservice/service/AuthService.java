@@ -13,6 +13,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.service.provisioning.WalletProvisi
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.PasswordPolicy;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
@@ -42,6 +43,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthEventPublisher authEventPublisher;
     private final LoginEligibilityPolicy loginEligibilityPolicy;
+    private final PasswordPolicy passwordPolicy;
     private final VerificationEmailSender verificationEmailSender;
     private final VerificationTokenCodec verificationTokenCodec;
     private final OAuthIdentityVerifier oauthIdentityVerifier;
@@ -56,6 +58,7 @@ public class AuthService {
 
     @Transactional
     public User register(String email, String password, String roleName) {
+        passwordPolicy.validate(password);
 
         // cek apakah email sudah ada
         if (userRepository.findByEmail(email).isPresent()) {
