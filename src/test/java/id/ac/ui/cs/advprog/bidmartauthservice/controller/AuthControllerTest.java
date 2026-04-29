@@ -396,9 +396,11 @@ class AuthControllerTest {
     @Test
     void disableUserShouldReturnNoContentWhenUserDisabled() throws Exception {
         when(authService.disableUser("buyer@test.com")).thenReturn(Optional.of(new User()));
+        when(authService.hasPermission("admin@test.com", "admin:*")).thenReturn(true);
 
         mockMvc.perform(post("/api/v1/auth/admin/disable-user")
-                .param("email", "buyer@test.com"))
+                .param("email", "buyer@test.com")
+                .requestAttr("userEmail", "admin@test.com"))
                 .andExpect(status().isNoContent());
     }
 
@@ -539,9 +541,11 @@ class AuthControllerTest {
                 .build();
 
         when(authService.createRole("BIDDER", List.of("bid:place"))).thenReturn(bidder);
+        when(authService.hasPermission("admin@test.com", "admin:*")).thenReturn(true);
 
         mockMvc.perform(post("/api/v1/auth/roles")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .requestAttr("userEmail", "admin@test.com")
                         .content("{\"name\":\"BIDDER\",\"permissions\":[\"bid:place\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("BIDDER"))
@@ -560,9 +564,11 @@ class AuthControllerTest {
                 .build();
 
         when(authService.assignUserRole(userId, "SELLER")).thenReturn(Optional.of(user));
+        when(authService.hasPermission("admin@test.com", "admin:*")).thenReturn(true);
 
         mockMvc.perform(put("/api/v1/auth/users/{userId}/roles", userId)
                         .contentType(MediaType.APPLICATION_JSON)
+                        .requestAttr("userEmail", "admin@test.com")
                         .content("{\"role\":\"SELLER\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("seller@test.com"))

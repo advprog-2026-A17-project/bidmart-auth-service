@@ -17,6 +17,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.AuthService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.ratelimit.AuthRateLimiter;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -33,6 +34,7 @@ public class AuthController {
 
     private final AuthService authService;
     private final TokenService tokenService;
+    private final AuthRateLimiter authRateLimiter;
 
     @PostMapping("/register")
     public ResponseEntity<AuthUserResponse> register(@Valid @RequestBody RegisterRequest request) {
@@ -48,6 +50,7 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
+        authRateLimiter.assertAllowed("login", request.email());
 
         Optional<User> user = authService.login(
                 request.email(),
@@ -67,6 +70,7 @@ public class AuthController {
 
     @PostMapping("/2fa/login-verify")
     public ResponseEntity<?> verifyTwoFactorLogin(@Valid @RequestBody id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorLoginVerifyRequest request) {
+        authRateLimiter.assertAllowed("2fa-login-verify", request.challengeToken());
         User user = tokenService.verifyTwoFactorChallenge(request.challengeToken());
         
         if (!authService.verifyTwoFactorCode(user.getEmail(), request.code())) {
@@ -78,6 +82,7 @@ public class AuthController {
 
     @PostMapping("/refresh")
     public ResponseEntity<?> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        authRateLimiter.assertAllowed("refresh", request.refreshToken());
         return ResponseEntity.ok(tokenService.refreshTokens(request.refreshToken()));
     }
 
@@ -169,6 +174,7 @@ public class AuthController {
 
     @PostMapping("/2fa/verify")
     public ResponseEntity<?> verifyTwoFactor(@Valid @RequestBody TwoFactorVerifyRequest request) {
+        authRateLimiter.assertAllowed("2fa-verify", request.email());
         boolean enabled = authService.verifyTwoFactor(request.email(), request.code());
         if (!enabled) {
             return ResponseEntity.badRequest().body(Map.of("message", "Invalid two factor code"));
@@ -178,6 +184,7 @@ public class AuthController {
 
     @PostMapping("/2fa/disable")
     public ResponseEntity<?> disableTwoFactor(@Valid @RequestBody TwoFactorVerifyRequest request) {
+        authRateLimiter.assertAllowed("2fa-disable", request.email());
         boolean disabled = authService.disableTwoFactor(request.email(), request.code());
         if (!disabled) {
             return ResponseEntity.badRequest().body(Map.of("message", "Invalid two factor code"));

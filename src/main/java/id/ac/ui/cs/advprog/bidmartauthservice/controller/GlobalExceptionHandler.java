@@ -4,6 +4,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredEx
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidRefreshTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.RateLimitExceededException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
 import org.springframework.http.HttpStatus;
@@ -51,6 +52,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidOAuthTokenException.class)
     public ResponseEntity<Map<String, String>> handleInvalidOAuthToken(InvalidOAuthTokenException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(MESSAGE_KEY, ex.getMessage()));
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<Map<String, String>> handleRateLimitExceeded(RateLimitExceededException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of(MESSAGE_KEY, ex.getMessage()));
     }
 
     @ExceptionHandler(id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidTwoFactorChallengeException.class)
