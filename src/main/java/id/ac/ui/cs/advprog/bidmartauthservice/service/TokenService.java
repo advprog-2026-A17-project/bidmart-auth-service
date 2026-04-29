@@ -24,6 +24,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -48,6 +49,9 @@ public class TokenService {
 
     @Value("${app.auth.jwt.secret:bidmart-auth-secret-key-bidmart-auth-secret-key}")
     private String jwtSecret;
+
+    @Value("${app.auth.sessions.max-concurrent:5}")
+    private int maxConcurrentSessions;
 
     public TokenService(
             RefreshTokenRepository refreshTokenRepository,
@@ -103,6 +107,8 @@ public class TokenService {
     }
 
     public TokenResponse generateRefreshToken(User user) {
+        enforceConcurrentSessionLimit(user);
+
         UUID tokenId = UUID.randomUUID();
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plusSeconds(refreshTokenExpirySeconds);
@@ -200,6 +206,24 @@ public class TokenService {
                 .expiration(Date.from(expiresAt))
                 .signWith(getSigningKey())
                 .compact();
+    }
+
+    private void enforceConcurrentSessionLimit(User user) {
+        if (maxConcurrentSessions <= 0) {
+            return;
+        }
+
+        List<RefreshToken> activeSessions = refreshTokenRepository.findByUserIdAndRevokedFalse(user.getId());
+        if (activeSessions.size() < maxConcurrentSessions) {
+            return;
+        }
+
+        activeSessions.stream()
+                .min(Comparator.comparing(RefreshToken::getCreatedAt))
+                .ifPresent(oldestSession -> {
+                    oldestSession.setRevoked(true);
+                    refreshTokenRepository.save(oldestSession);
+                });
     }
 
     private Claims parseAndValidateRefreshToken(String refreshToken) {
