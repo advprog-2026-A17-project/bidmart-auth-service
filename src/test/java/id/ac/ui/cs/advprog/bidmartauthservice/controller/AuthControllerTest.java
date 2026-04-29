@@ -19,6 +19,8 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.AuthService;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.ratelimit.AuthRateLimiter;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.RateLimitExceededException;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +36,8 @@ import java.util.List;
 
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -52,6 +56,9 @@ class AuthControllerTest {
 
     @MockBean
     private TokenService tokenService;
+
+    @MockBean
+    private AuthRateLimiter authRateLimiter;
 
         @Autowired
         private ObjectMapper objectMapper;
@@ -151,6 +158,22 @@ class AuthControllerTest {
     }
 
     @Test
+    void loginShouldReturnTooManyRequestsWhenRateLimited() throws Exception {
+        doThrow(new RateLimitExceededException("Too many authentication attempts"))
+                .when(authRateLimiter).assertAllowed("login", "buyer@test.com");
+
+        LoginRequest request = new LoginRequest("buyer@test.com", "pass");
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many authentication attempts"));
+
+        verify(authService, never()).login("buyer@test.com", "pass");
+    }
+
+    @Test
     void refreshShouldReturnRotatedTokensWhenRefreshTokenValid() throws Exception {
         when(tokenService.refreshTokens("refresh-token")).thenReturn(new TokenResponse(
                 "new-access-token",
@@ -168,6 +191,22 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").value("new-access-token"))
                 .andExpect(jsonPath("$.refreshToken").value("new-refresh-token"));
+    }
+
+    @Test
+    void refreshShouldReturnTooManyRequestsWhenRateLimited() throws Exception {
+        doThrow(new RateLimitExceededException("Too many authentication attempts"))
+                .when(authRateLimiter).assertAllowed("refresh", "refresh-token");
+
+        RefreshTokenRequest request = new RefreshTokenRequest("refresh-token");
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many authentication attempts"));
+
+        verify(tokenService, never()).refreshTokens("refresh-token");
     }
 
     @Test
@@ -464,6 +503,20 @@ class AuthControllerTest {
                         .content("{\"email\":\"buyer@test.com\",\"code\":\"123456\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.enabled").value(true));
+    }
+
+    @Test
+    void verifyTwoFactorShouldReturnTooManyRequestsWhenRateLimited() throws Exception {
+        doThrow(new RateLimitExceededException("Too many authentication attempts"))
+                .when(authRateLimiter).assertAllowed("2fa-verify", "buyer@test.com");
+
+        mockMvc.perform(post("/api/v1/auth/2fa/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"buyer@test.com\",\"code\":\"123456\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many authentication attempts"));
+
+        verify(authService, never()).verifyTwoFactor("buyer@test.com", "123456");
     }
 
     @Test
