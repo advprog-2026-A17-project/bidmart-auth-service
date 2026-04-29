@@ -6,12 +6,14 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.util.List;
@@ -35,6 +37,13 @@ class TokenServiceTest {
 
     @InjectMocks
     private TokenService tokenService;
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(tokenService, "jwtSecret", "bidmart-auth-secret-key-bidmart-auth-secret-key");
+        ReflectionTestUtils.setField(tokenService, "accessTokenExpirySeconds", 900L);
+        ReflectionTestUtils.setField(tokenService, "refreshTokenExpirySeconds", 604800L);
+    }
 
     @Test
     void issueTokensShouldPersistRefreshTokenAndReturnAccessToken() {

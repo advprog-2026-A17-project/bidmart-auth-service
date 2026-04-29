@@ -11,7 +11,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
@@ -22,18 +22,28 @@ import java.util.List;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class TokenService {
 
     private static final String TOKEN_TYPE_ACCESS = "access";
     private static final String TOKEN_TYPE_REFRESH = "refresh";
     private static final String TOKEN_TYPE_BEARER = "Bearer";
-    private static final long ACCESS_TOKEN_EXPIRY_SECONDS = 900L;
-    private static final long REFRESH_TOKEN_EXPIRY_SECONDS = 604800L;
-    private static final String JWT_SECRET = "bidmart-auth-secret-key-bidmart-auth-secret-key";
 
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserRepository userRepository;
+
+    @Value("${app.auth.jwt.access-ttl-seconds:900}")
+    private long accessTokenExpirySeconds;
+
+    @Value("${app.auth.jwt.refresh-ttl-seconds:604800}")
+    private long refreshTokenExpirySeconds;
+
+    @Value("${app.auth.jwt.secret:bidmart-auth-secret-key-bidmart-auth-secret-key}")
+    private String jwtSecret;
+
+    public TokenService(RefreshTokenRepository refreshTokenRepository, UserRepository userRepository) {
+        this.refreshTokenRepository = refreshTokenRepository;
+        this.userRepository = userRepository;
+    }
 
     public TokenResponse issueTokens(User user) {
         String accessToken = generateAccessToken(user);
@@ -43,7 +53,7 @@ public class TokenService {
                 accessToken,
                 refreshOnlyResponse.refreshToken(),
                 TOKEN_TYPE_BEARER,
-                ACCESS_TOKEN_EXPIRY_SECONDS,
+                accessTokenExpirySeconds,
                 AuthUserResponse.fromUser(user)
         );
     }
@@ -51,7 +61,7 @@ public class TokenService {
     public TokenResponse generateRefreshToken(User user) {
         UUID tokenId = UUID.randomUUID();
         Instant issuedAt = Instant.now();
-        Instant expiresAt = issuedAt.plusSeconds(REFRESH_TOKEN_EXPIRY_SECONDS);
+        Instant expiresAt = issuedAt.plusSeconds(refreshTokenExpirySeconds);
         String refreshToken = Jwts.builder()
                 .subject(user.getId().toString())
                 .id(tokenId.toString())
@@ -135,7 +145,7 @@ public class TokenService {
 
     private String generateAccessToken(User user) {
         Instant issuedAt = Instant.now();
-        Instant expiresAt = issuedAt.plusSeconds(ACCESS_TOKEN_EXPIRY_SECONDS);
+        Instant expiresAt = issuedAt.plusSeconds(accessTokenExpirySeconds);
 
         return Jwts.builder()
                 .subject(user.getId().toString())
@@ -162,6 +172,6 @@ public class TokenService {
     }
 
     private SecretKey getSigningKey() {
-        return Keys.hmacShaKeyFor(JWT_SECRET.getBytes(StandardCharsets.UTF_8));
+        return Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
     }
 }
