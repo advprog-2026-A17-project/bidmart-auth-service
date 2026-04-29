@@ -52,4 +52,9 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> handleInvalidOAuthToken(InvalidOAuthTokenException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(MESSAGE_KEY, ex.getMessage()));
     }
+
+    @ExceptionHandler(id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidTwoFactorChallengeException.class)
+    public ResponseEntity<Map<String, String>> handleInvalidTwoFactorChallenge(id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidTwoFactorChallengeException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(MESSAGE_KEY, ex.getMessage()));
+    }
 }

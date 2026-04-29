@@ -263,6 +263,12 @@ public class AuthService {
                 .orElse(false);
     }
 
+    public boolean verifyTwoFactorCode(String email, String code) {
+        return userRepository.findByEmail(email)
+                .filter(user -> twoFactorTotpService.isCodeValid(user.getTwoFactorSecret(), code))
+                .isPresent();
+    }
+
     @Transactional
     public boolean disableTwoFactor(String email, String code) {
         return userRepository.findByEmail(email)

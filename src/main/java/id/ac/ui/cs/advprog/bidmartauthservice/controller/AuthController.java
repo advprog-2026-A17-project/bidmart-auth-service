@@ -55,10 +55,25 @@ public class AuthController {
         );
 
         if (user.isPresent()) {
-            return ResponseEntity.ok(tokenService.issueTokens(user.get()));
+            User authenticatedUser = user.get();
+            if (authenticatedUser.isTwoFactorEnabled()) {
+                return ResponseEntity.ok(tokenService.issueTwoFactorChallenge(authenticatedUser));
+            }
+            return ResponseEntity.ok(tokenService.issueTokens(authenticatedUser));
         }
 
         return ResponseEntity.status(401).body("Invalid credentials");
+    }
+
+    @PostMapping("/2fa/login-verify")
+    public ResponseEntity<?> verifyTwoFactorLogin(@Valid @RequestBody id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorLoginVerifyRequest request) {
+        User user = tokenService.verifyTwoFactorChallenge(request.challengeToken());
+        
+        if (!authService.verifyTwoFactorCode(user.getEmail(), request.code())) {
+            return ResponseEntity.status(401).body("Invalid two factor code");
+        }
+        
+        return ResponseEntity.ok(tokenService.issueTokens(user));
     }
 
     @PostMapping("/refresh")

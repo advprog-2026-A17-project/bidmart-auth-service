@@ -3,10 +3,14 @@ package id.ac.ui.cs.advprog.bidmartauthservice.service;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.AuthUserResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.SessionResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorChallengeResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidRefreshTokenException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidTwoFactorChallengeException;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.RefreshToken;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.TwoFactorChallenge;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.TwoFactorChallengeRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
@@ -16,7 +20,10 @@ import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -27,8 +34,10 @@ public class TokenService {
     private static final String TOKEN_TYPE_ACCESS = "access";
     private static final String TOKEN_TYPE_REFRESH = "refresh";
     private static final String TOKEN_TYPE_BEARER = "Bearer";
+    private static final long TWO_FACTOR_CHALLENGE_TTL_SECONDS = 300L; // 5 minutes
 
     private final RefreshTokenRepository refreshTokenRepository;
+    private final TwoFactorChallengeRepository twoFactorChallengeRepository;
     private final UserRepository userRepository;
 
     @Value("${app.auth.jwt.access-ttl-seconds:900}")
@@ -40,8 +49,12 @@ public class TokenService {
     @Value("${app.auth.jwt.secret:bidmart-auth-secret-key-bidmart-auth-secret-key}")
     private String jwtSecret;
 
-    public TokenService(RefreshTokenRepository refreshTokenRepository, UserRepository userRepository) {
+    public TokenService(
+            RefreshTokenRepository refreshTokenRepository,
+            TwoFactorChallengeRepository twoFactorChallengeRepository,
+            UserRepository userRepository) {
         this.refreshTokenRepository = refreshTokenRepository;
+        this.twoFactorChallengeRepository = twoFactorChallengeRepository;
         this.userRepository = userRepository;
     }
 
@@ -56,6 +69,37 @@ public class TokenService {
                 accessTokenExpirySeconds,
                 AuthUserResponse.fromUser(user)
         );
+    }
+
+    public TwoFactorChallengeResponse issueTwoFactorChallenge(User user) {
+        String rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(UUID.randomUUID().toString().getBytes());
+        String tokenHash = hashToken(rawToken);
+
+        TwoFactorChallenge challenge = TwoFactorChallenge.builder()
+                .id(UUID.randomUUID())
+                .user(user)
+                .tokenHash(tokenHash)
+                .expiresAt(Instant.now().plusSeconds(TWO_FACTOR_CHALLENGE_TTL_SECONDS))
+                .used(false)
+                .build();
+        
+        twoFactorChallengeRepository.save(challenge);
+        return new TwoFactorChallengeResponse(rawToken);
+    }
+
+    public User verifyTwoFactorChallenge(String challengeToken) {
+        String tokenHash = hashToken(challengeToken);
+        TwoFactorChallenge challenge = twoFactorChallengeRepository.findByTokenHashAndUsedFalse(tokenHash)
+                .orElseThrow(() -> new InvalidTwoFactorChallengeException("Invalid or expired 2FA challenge token"));
+
+        if (challenge.getExpiresAt().isBefore(Instant.now())) {
+            throw new InvalidTwoFactorChallengeException("2FA challenge token has expired");
+        }
+
+        challenge.setUsed(true);
+        twoFactorChallengeRepository.save(challenge);
+
+        return challenge.getUser();
     }
 
     public TokenResponse generateRefreshToken(User user) {
@@ -173,5 +217,15 @@ public class TokenService {
 
     private SecretKey getSigningKey() {
         return Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String hashToken(String token) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(token.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm not available", e);
+        }
     }
 }
