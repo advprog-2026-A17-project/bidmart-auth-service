@@ -8,9 +8,12 @@ import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProvider
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.PermissionRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.provisioning.WalletProvisioningOutboxService;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.PasswordPolicy;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
 import org.junit.jupiter.api.Tag;
@@ -19,16 +22,21 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -44,6 +52,9 @@ class AuthServiceTest {
     private RoleRepository roleRepository;
 
     @Mock
+    private PermissionRepository permissionRepository;
+
+    @Mock
     private EmailVerificationTokenRepository emailVerificationTokenRepository;
 
     @Mock
@@ -54,6 +65,9 @@ class AuthServiceTest {
 
     @Mock
     private LoginEligibilityPolicy loginEligibilityPolicy;
+
+    @Mock
+    private PasswordPolicy passwordPolicy;
 
     @Mock
     private VerificationEmailSender verificationEmailSender;
@@ -67,8 +81,53 @@ class AuthServiceTest {
     @Mock
     private WalletProvisioningOutboxService walletProvisioningOutboxService;
 
+    @Mock
+    private AuthAuditOutboxService authAuditOutboxService;
+
+    @Spy
+    private TwoFactorTotpService twoFactorTotpService = new TwoFactorTotpService();
+
     @InjectMocks
     private AuthService authService;
+
+    private static String currentTotp(String base32Secret) {
+        try {
+            byte[] key = decodeBase32(base32Secret);
+            long counter = Instant.now().getEpochSecond() / 30L;
+            byte[] counterBytes = ByteBuffer.allocate(Long.BYTES).putLong(counter).array();
+            Mac mac = Mac.getInstance("HmacSHA1");
+            mac.init(new SecretKeySpec(key, "HmacSHA1"));
+            byte[] hash = mac.doFinal(counterBytes);
+            int offset = hash[hash.length - 1] & 0x0f;
+            int binary = ((hash[offset] & 0x7f) << 24)
+                    | ((hash[offset + 1] & 0xff) << 16)
+                    | ((hash[offset + 2] & 0xff) << 8)
+                    | (hash[offset + 3] & 0xff);
+            return String.format("%06d", binary % 1_000_000);
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static byte[] decodeBase32(String value) {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        int buffer = 0;
+        int bitsLeft = 0;
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        for (char character : value.toUpperCase(java.util.Locale.ROOT).toCharArray()) {
+            int index = alphabet.indexOf(character);
+            if (index < 0) {
+                throw new IllegalArgumentException("Invalid base32 secret");
+            }
+            buffer = (buffer << 5) | index;
+            bitsLeft += 5;
+            if (bitsLeft >= 8) {
+                output.write((buffer >> (bitsLeft - 8)) & 0xff);
+                bitsLeft -= 8;
+            }
+        }
+        return output.toByteArray();
+    }
 
     @Test
     void registerShouldSaveEnabledUserWhenEmailIsAvailable() {
@@ -115,6 +174,7 @@ class AuthServiceTest {
         assertNotNull(tokenCaptor.getValue().getExpiresAt());
 
         verify(userRepository).findByEmail(email);
+        verify(passwordPolicy).validate(password);
         verify(roleRepository).findByName(roleName);
         verify(passwordEncoder).encode(password);
         verify(userRepository).save(any(User.class));
@@ -137,6 +197,26 @@ class AuthServiceTest {
         assertEquals("Email already registered", exception.getMessage());
         verify(userRepository).findByEmail(email);
         verify(roleRepository, never()).findByName(anyString());
+        verify(userRepository, never()).save(any(User.class));
+        verify(walletProvisioningOutboxService, never()).enqueueWalletProvisionRequested(any(User.class));
+    }
+
+    @Test
+    void registerShouldRejectPasswordThatViolatesPolicy() {
+        String email = "service@test.com";
+        String password = "weak";
+
+        doThrow(new IllegalArgumentException("Password does not meet policy"))
+                .when(passwordPolicy).validate(password);
+
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> authService.register(email, password, "BUYER")
+        );
+
+        assertEquals("Password does not meet policy", exception.getMessage());
+        verify(passwordPolicy).validate(password);
+        verify(userRepository, never()).findByEmail(anyString());
         verify(userRepository, never()).save(any(User.class));
         verify(walletProvisioningOutboxService, never()).enqueueWalletProvisionRequested(any(User.class));
     }
@@ -251,6 +331,102 @@ class AuthServiceTest {
 
         assertTrue(result.isPresent());
         assertEquals(email, result.get().getEmail());
+    }
+
+    @Test
+    void setupTwoFactorShouldPersistSecretAndReturnQrCodeUrl() {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("buyer@test.com")
+                .build();
+        when(userRepository.findByEmail("buyer@test.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = authService.setupTwoFactor("buyer@test.com");
+
+        assertNotNull(response.secret());
+        assertTrue(response.qrCodeUrl().startsWith("otpauth://totp/BidMart:buyer@test.com"));
+        assertEquals(response.secret(), user.getTwoFactorSecret());
+        assertFalse(user.isTwoFactorEnabled());
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void verifyTwoFactorShouldEnableFeatureWhenCodeIsValid() {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("buyer@test.com")
+                .twoFactorSecret("JBSWY3DPEHPK3PXP")
+                .twoFactorEnabled(false)
+                .build();
+        when(userRepository.findByEmail("buyer@test.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        boolean verified = authService.verifyTwoFactor("buyer@test.com", currentTotp("JBSWY3DPEHPK3PXP"));
+
+        assertTrue(verified);
+        assertTrue(user.isTwoFactorEnabled());
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void disableTwoFactorShouldClearSecretWhenCodeIsValid() {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("buyer@test.com")
+                .twoFactorSecret("JBSWY3DPEHPK3PXP")
+                .twoFactorEnabled(true)
+                .build();
+        when(userRepository.findByEmail("buyer@test.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        boolean disabled = authService.disableTwoFactor("buyer@test.com", currentTotp("JBSWY3DPEHPK3PXP"));
+
+        assertTrue(disabled);
+        assertFalse(user.isTwoFactorEnabled());
+        assertNull(user.getTwoFactorSecret());
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void createRoleShouldReuseExistingPermissionsAndCreateMissingPermissions() {
+        Permission existing = Permission.builder().id(UUID.randomUUID()).name("bid:place").build();
+        when(permissionRepository.findByName("bid:place")).thenReturn(Optional.of(existing));
+        when(permissionRepository.findByName("auction:close")).thenReturn(Optional.empty());
+        when(permissionRepository.save(any(Permission.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(roleRepository.save(any(Role.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Role role = authService.createRole("AUCTION_MANAGER", java.util.List.of("bid:place", "auction:close"));
+
+        assertEquals("AUCTION_MANAGER", role.getName());
+        assertEquals(2, role.getPermissions().size());
+        assertTrue(role.getPermissions().stream().anyMatch(permission -> "bid:place".equals(permission.getName())));
+        assertTrue(role.getPermissions().stream().anyMatch(permission -> "auction:close".equals(permission.getName())));
+        verify(roleRepository).save(any(Role.class));
+        verify(permissionRepository).save(any(Permission.class));
+        verify(authAuditOutboxService).enqueueRoleCreated(role);
+    }
+
+    @Test
+    void assignUserRoleShouldReplaceExistingRoles() {
+        UUID userId = UUID.randomUUID();
+        Role buyer = Role.builder().id(UUID.randomUUID()).name("BUYER").build();
+        Role seller = Role.builder().id(UUID.randomUUID()).name("SELLER").build();
+        User user = User.builder()
+                .id(userId)
+                .email("seller@test.com")
+                .roles(Set.of(buyer))
+                .build();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(roleRepository.findByName("SELLER")).thenReturn(Optional.of(seller));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<User> updated = authService.assignUserRole(userId, "SELLER");
+
+        assertTrue(updated.isPresent());
+        assertEquals(Set.of(seller), updated.get().getRoles());
+        verify(userRepository).save(user);
+        verify(authAuditOutboxService).enqueueUserRoleChanged(user, seller);
     }
 
     @Test
@@ -394,6 +570,7 @@ class AuthServiceTest {
         assertFalse(disabled.get().isEnabled());
         verify(userRepository).save(user);
         verify(authEventPublisher).publishUserDisabled(user);
+        verify(authAuditOutboxService).enqueueUserDisabled(user);
     }
 
     @Test
