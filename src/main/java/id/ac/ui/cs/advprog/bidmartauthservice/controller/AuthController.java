@@ -1,15 +1,17 @@
 package id.ac.ui.cs.advprog.bidmartauthservice.controller;
 
+import id.ac.ui.cs.advprog.bidmartauthservice.annotation.RequirePermission;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.AssignRoleRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.AuthUserResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.CreateRoleRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.LoginRequest;
-import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
-import id.ac.ui.cs.advprog.bidmartauthservice.dto.AuthUserResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.OAuthLoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RefreshTokenRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RoleResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorEmailRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorLoginVerifyRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorVerifyRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UserProfileResponse;
@@ -69,7 +71,7 @@ public class AuthController {
     }
 
     @PostMapping("/2fa/login-verify")
-    public ResponseEntity<?> verifyTwoFactorLogin(@Valid @RequestBody id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorLoginVerifyRequest request) {
+    public ResponseEntity<?> verifyTwoFactorLogin(@Valid @RequestBody TwoFactorLoginVerifyRequest request) {
         authRateLimiter.assertAllowed("2fa-login-verify", request.challengeToken());
         User user = tokenService.verifyTwoFactorChallenge(request.challengeToken());
         
@@ -142,7 +144,7 @@ public class AuthController {
     }
 
     @PostMapping("/admin/disable-user")
-    @id.ac.ui.cs.advprog.bidmartauthservice.annotation.RequirePermission("admin:users")
+    @RequirePermission("admin:users")
     public ResponseEntity<Void> disableUser(@RequestParam String email) {
         return authService.disableUser(email).map(user -> {
             tokenService.revokeAllSessionsForUser(user.getId());
@@ -193,13 +195,13 @@ public class AuthController {
     }
 
     @PostMapping("/roles")
-    @id.ac.ui.cs.advprog.bidmartauthservice.annotation.RequirePermission("admin:roles")
+    @RequirePermission("admin:roles")
     public ResponseEntity<RoleResponse> createRole(@Valid @RequestBody CreateRoleRequest request) {
         return ResponseEntity.ok(RoleResponse.fromRole(authService.createRole(request.name(), request.permissions())));
     }
 
     @PutMapping("/users/{userId}/roles")
-    @id.ac.ui.cs.advprog.bidmartauthservice.annotation.RequirePermission("admin:roles")
+    @RequirePermission("admin:roles")
     public ResponseEntity<?> assignUserRole(
             @PathVariable UUID userId,
             @Valid @RequestBody AssignRoleRequest request
