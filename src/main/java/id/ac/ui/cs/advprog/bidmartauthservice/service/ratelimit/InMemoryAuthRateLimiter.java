@@ -1,6 +1,7 @@
 package id.ac.ui.cs.advprog.bidmartauthservice.service.ratelimit;
 
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RateLimitExceededException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -23,6 +24,7 @@ public class InMemoryAuthRateLimiter implements AuthRateLimiter {
     @Value("${app.auth.rate-limit.window-seconds:60}")
     private long windowSeconds;
 
+    @Autowired
     public InMemoryAuthRateLimiter() {
         this(Clock.systemUTC());
     }

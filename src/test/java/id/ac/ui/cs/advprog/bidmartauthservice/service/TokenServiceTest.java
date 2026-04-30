@@ -3,8 +3,10 @@ package id.ac.ui.cs.advprog.bidmartauthservice.service;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.RefreshToken;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.TwoFactorChallenge;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.TwoFactorChallengeRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxService;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +34,9 @@ class TokenServiceTest {
 
     @Mock
     private RefreshTokenRepository refreshTokenRepository;
+
+    @Mock
+    private TwoFactorChallengeRepository twoFactorChallengeRepository;
 
     @Mock
     private UserRepository userRepository;
@@ -175,6 +180,58 @@ class TokenServiceTest {
         assertTrue(session.isRevoked());
         verify(refreshTokenRepository).save(session);
         verify(authAuditOutboxService).enqueueSessionRevoked(session);
+    }
+
+    @Test
+    void issueTwoFactorChallengeShouldPersistChallengeAndReturnRawToken() {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("token@test.com")
+                .enabled(true)
+                .roles(Set.of(Role.builder().id(UUID.randomUUID()).name("BUYER").build()))
+                .build();
+
+        when(twoFactorChallengeRepository.save(any(TwoFactorChallenge.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = tokenService.issueTwoFactorChallenge(user);
+
+        assertNotNull(response.challengeToken());
+        assertTrue(response.twoFactorRequired());
+        assertEquals("Two-factor authentication required", response.message());
+        verify(twoFactorChallengeRepository).save(argThat(challenge ->
+                challenge.getUser().equals(user)
+                        && !challenge.isUsed()
+                        && challenge.getTokenHash() != null
+                        && challenge.getExpiresAt().isAfter(Instant.now())
+        ));
+    }
+
+    @Test
+    void verifyTwoFactorChallengeShouldMarkChallengeUsedAndReturnUser() {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("token@test.com")
+                .enabled(true)
+                .roles(Set.of(Role.builder().id(UUID.randomUUID()).name("BUYER").build()))
+                .build();
+        var challengeResponse = tokenService.issueTwoFactorChallenge(user);
+        TwoFactorChallenge savedChallenge = mockingDetails(twoFactorChallengeRepository)
+                .getInvocations()
+                .stream()
+                .filter(invocation -> invocation.getMethod().getName().equals("save"))
+                .map(invocation -> (TwoFactorChallenge) invocation.getArgument(0))
+                .findFirst()
+                .orElseThrow();
+
+        when(twoFactorChallengeRepository.findByTokenHashAndUsedFalse(savedChallenge.getTokenHash()))
+                .thenReturn(Optional.of(savedChallenge));
+
+        User verifiedUser = tokenService.verifyTwoFactorChallenge(challengeResponse.challengeToken());
+
+        assertEquals(user, verifiedUser);
+        assertTrue(savedChallenge.isUsed());
+        verify(twoFactorChallengeRepository, times(2)).save(savedChallenge);
     }
 
     @Test

@@ -25,6 +25,9 @@ public class AuthAuditOutboxService {
     private static final String AGGREGATE_USER = "USER";
     private static final String AGGREGATE_ROLE = "ROLE";
     private static final String AGGREGATE_SESSION = "SESSION";
+    private static final String PAYLOAD_EMAIL = "email";
+    private static final String PAYLOAD_OCCURRED_AT = "occurredAt";
+    private static final String PAYLOAD_USER_ID = "userId";
 
     public static final String EVENT_ROLE_CREATED = "RoleCreated";
     public static final String EVENT_USER_ROLE_CHANGED = "UserRoleChanged";
@@ -52,7 +55,7 @@ public class AuthAuditOutboxService {
                         "roleId", role.getId(),
                         "roleName", role.getName(),
                         "permissions", permissions,
-                        "occurredAt", now.toString()
+                        PAYLOAD_OCCURRED_AT, now.toString()
                 ),
                 now
         );
@@ -66,11 +69,11 @@ public class AuthAuditOutboxService {
                 user.getId(),
                 EVENT_USER_ROLE_CHANGED,
                 Map.of(
-                        "userId", user.getId(),
-                        "email", user.getEmail(),
+                        PAYLOAD_USER_ID, user.getId(),
+                        PAYLOAD_EMAIL, user.getEmail(),
                         "roleId", assignedRole.getId(),
                         "roleName", assignedRole.getName(),
-                        "occurredAt", now.toString()
+                        PAYLOAD_OCCURRED_AT, now.toString()
                 ),
                 now
         );
@@ -84,9 +87,9 @@ public class AuthAuditOutboxService {
                 user.getId(),
                 EVENT_USER_DISABLED,
                 Map.of(
-                        "userId", user.getId(),
-                        "email", user.getEmail(),
-                        "occurredAt", now.toString()
+                        PAYLOAD_USER_ID, user.getId(),
+                        PAYLOAD_EMAIL, user.getEmail(),
+                        PAYLOAD_OCCURRED_AT, now.toString()
                 ),
                 now
         );
@@ -102,9 +105,9 @@ public class AuthAuditOutboxService {
                 EVENT_SESSION_REVOKED,
                 Map.of(
                         "sessionId", refreshToken.getTokenId(),
-                        "userId", user.getId(),
-                        "email", user.getEmail(),
-                        "occurredAt", now.toString()
+                        PAYLOAD_USER_ID, user.getId(),
+                        PAYLOAD_EMAIL, user.getEmail(),
+                        PAYLOAD_OCCURRED_AT, now.toString()
                 ),
                 now
         );

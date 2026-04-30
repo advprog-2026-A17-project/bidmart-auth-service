@@ -49,7 +49,7 @@ public class TokenService {
     @Value("${app.auth.jwt.refresh-ttl-seconds:604800}")
     private long refreshTokenExpirySeconds;
 
-    @Value("${app.auth.jwt.secret:bidmart-auth-secret-key-bidmart-auth-secret-key}")
+    @Value("${app.auth.jwt.secret}")
     private String jwtSecret;
 
     @Value("${app.auth.sessions.max-concurrent:5}")
@@ -254,7 +254,7 @@ public class TokenService {
             byte[] hash = digest.digest(token.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(hash);
         } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 algorithm not available", e);
+            throw new IllegalStateException("SHA-256 algorithm not available", e);
         }
     }
 }

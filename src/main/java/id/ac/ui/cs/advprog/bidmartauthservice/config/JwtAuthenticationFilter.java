@@ -17,7 +17,7 @@ import java.nio.charset.StandardCharsets;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    @Value("${app.auth.jwt.secret:bidmart-auth-secret-key-bidmart-auth-secret-key}")
+    @Value("${app.auth.jwt.secret}")
     private String jwtSecret;
 
     @Override

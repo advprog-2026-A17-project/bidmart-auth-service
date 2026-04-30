@@ -7,6 +7,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.SessionResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorChallengeResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.OAuthLoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
@@ -25,8 +26,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Optional;
@@ -51,13 +52,13 @@ class AuthControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @MockBean
+    @MockitoBean
     private AuthService authService;
 
-    @MockBean
+    @MockitoBean
     private TokenService tokenService;
 
-    @MockBean
+    @MockitoBean
     private AuthRateLimiter authRateLimiter;
 
         @Autowired
@@ -127,6 +128,75 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.tokenType").value("Bearer"))
                 .andExpect(jsonPath("$.expiresIn").value(900))
                 .andExpect(jsonPath("$.user.password").doesNotExist());
+    }
+
+    @Test
+    void loginShouldReturnTwoFactorChallengeWhenEnabled() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("buyer@test.com");
+        user.setPassword("pass");
+        user.setEnabled(true);
+        user.setTwoFactorEnabled(true);
+
+        when(authService.login("buyer@test.com", "pass")).thenReturn(Optional.of(user));
+        when(tokenService.issueTwoFactorChallenge(user))
+                .thenReturn(new TwoFactorChallengeResponse("challenge-token"));
+
+        LoginRequest request = new LoginRequest("buyer@test.com", "pass");
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.challengeToken").value("challenge-token"))
+                .andExpect(jsonPath("$.twoFactorRequired").value(true));
+
+        verify(tokenService, never()).issueTokens(user);
+    }
+
+    @Test
+    void verifyTwoFactorLoginShouldIssueTokensWhenCodeValid() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("buyer@test.com");
+        user.setEnabled(true);
+
+        when(tokenService.verifyTwoFactorChallenge("challenge-token")).thenReturn(user);
+        when(authService.verifyTwoFactorCode("buyer@test.com", "123456")).thenReturn(true);
+        when(tokenService.issueTokens(user)).thenReturn(new TokenResponse(
+                "access-token",
+                "refresh-token",
+                "Bearer",
+                900,
+                null
+        ));
+
+        mockMvc.perform(post("/api/v1/auth/2fa/login-verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"challengeToken\":\"challenge-token\",\"code\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").value("access-token"))
+                .andExpect(jsonPath("$.refreshToken").value("refresh-token"));
+    }
+
+    @Test
+    void verifyTwoFactorLoginShouldRejectInvalidCode() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("buyer@test.com");
+        user.setEnabled(true);
+
+        when(tokenService.verifyTwoFactorChallenge("challenge-token")).thenReturn(user);
+        when(authService.verifyTwoFactorCode("buyer@test.com", "000000")).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/auth/2fa/login-verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"challengeToken\":\"challenge-token\",\"code\":\"000000\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string("Invalid two factor code"));
+
+        verify(tokenService, never()).issueTokens(user);
     }
 
     @Test
