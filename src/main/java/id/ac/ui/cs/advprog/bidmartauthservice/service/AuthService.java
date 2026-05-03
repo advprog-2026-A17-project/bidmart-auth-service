@@ -19,6 +19,8 @@ import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredEx
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -88,11 +90,20 @@ public class AuthService {
         return savedUser;
     }
 
-    public Optional<User> login(String email, String password) {
-        return userRepository.findByEmail(email)
-                .filter(loginEligibilityPolicy::isPasswordCheckAllowed)
-                .filter(user -> passwordEncoder.matches(password, user.getPassword()))
-                .flatMap(loginEligibilityPolicy::resolveSuccessfulLogin);
+    public User login(String email, String password) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException("User with email " + email + " is not registered"));
+
+        if (!loginEligibilityPolicy.isPasswordCheckAllowed(user)) {
+            throw new InvalidCredentialsException("Login not allowed at this time");
+        }
+
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new InvalidCredentialsException("Incorrect password");
+        }
+
+        return loginEligibilityPolicy.resolveSuccessfulLogin(user)
+                .orElseThrow(() -> new InvalidCredentialsException("Could not complete login"));
     }
 
     public Optional<User> findByEmail(String email) {

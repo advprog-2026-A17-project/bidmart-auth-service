@@ -13,7 +13,10 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.RateLimitExceededException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UserNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Permission;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
@@ -22,7 +25,6 @@ import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.AuthService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.RedisSessionCacheService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.ratelimit.AuthRateLimiter;
-import id.ac.ui.cs.advprog.bidmartauthservice.exception.RateLimitExceededException;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -49,7 +51,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import org.springframework.context.annotation.Import;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.GlobalExceptionHandler;
+
 @WebMvcTest(AuthController.class)
+@Import(GlobalExceptionHandler.class)
 @Tag("unit")
 class AuthControllerTest {
 
@@ -118,7 +124,7 @@ class AuthControllerTest {
         user.setRoles(Set.of(buyerRole));
 
         when(authService.login("buyer@test.com", "pass"))
-                .thenReturn(Optional.of(user));
+                .thenReturn(user);
         when(tokenService.issueTokens(user, "Unknown Device")).thenReturn(new TokenResponse(
                 "access-token",
                 "refresh-token",
@@ -149,7 +155,7 @@ class AuthControllerTest {
         user.setEnabled(true);
         user.setTwoFactorEnabled(true);
 
-        when(authService.login("buyer@test.com", "pass")).thenReturn(Optional.of(user));
+        when(authService.login("buyer@test.com", "pass")).thenReturn(user);
         when(tokenService.issueTwoFactorChallenge(user))
                 .thenReturn(new TwoFactorChallengeResponse("challenge-token"));
 
@@ -212,7 +218,7 @@ class AuthControllerTest {
     @Test
     void loginShouldReturnUnauthorizedWhenCredentialsInvalid() throws Exception {
         when(authService.login("buyer@test.com", "wrong"))
-                .thenReturn(Optional.empty());
+                .thenThrow(new InvalidCredentialsException("Incorrect password"));
 
         LoginRequest request = new LoginRequest("buyer@test.com", "wrong");
 
@@ -220,7 +226,8 @@ class AuthControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isUnauthorized())
-                .andExpect(content().string("Invalid credentials"));
+                .andExpect(jsonPath("$.error").value("INVALID_CREDENTIALS"))
+                .andExpect(jsonPath("$.message").value("Incorrect password"));
     }
 
     @Test

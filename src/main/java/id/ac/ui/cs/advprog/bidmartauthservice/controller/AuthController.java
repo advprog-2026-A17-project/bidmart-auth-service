@@ -63,20 +63,12 @@ public class AuthController {
     ) {
         authRateLimiter.assertAllowed("login", request.email());
 
-        Optional<User> user = authService.login(
-                request.email(),
-                request.password()
-        );
+        User user = authService.login(request.email(), request.password());
 
-        if (user.isPresent()) {
-            User authenticatedUser = user.get();
-            if (authenticatedUser.isTwoFactorEnabled()) {
-                return ResponseEntity.ok(tokenService.issueTwoFactorChallenge(authenticatedUser));
-            }
-            return ResponseEntity.ok(tokenService.issueTokens(authenticatedUser, userAgent));
+        if (user.isTwoFactorEnabled()) {
+            return ResponseEntity.ok(tokenService.issueTwoFactorChallenge(user));
         }
-
-        return ResponseEntity.status(401).body("Invalid credentials");
+        return ResponseEntity.ok(tokenService.issueTokens(user, userAgent));
     }
 
     @PostMapping("/2fa/login-verify")

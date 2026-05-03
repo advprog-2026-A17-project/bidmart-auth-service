@@ -10,6 +10,8 @@ import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.PermissionRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UserNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.provisioning.WalletProvisioningOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
@@ -237,15 +239,15 @@ class AuthServiceTest {
         when(passwordEncoder.matches(password, "encoded-secret")).thenReturn(true);
         when(loginEligibilityPolicy.resolveSuccessfulLogin(user)).thenReturn(Optional.of(user));
 
-        Optional<User> result = authService.login(email, password);
+        User result = authService.login(email, password);
 
-        assertTrue(result.isPresent());
-        assertEquals(email, result.get().getEmail());
+        assertNotNull(result);
+        assertEquals(email, result.getEmail());
         verify(passwordEncoder).matches(password, "encoded-secret");
     }
 
     @Test
-    void loginShouldReturnEmptyWhenPasswordIsInvalid() {
+    void loginShouldThrowWhenPasswordIsInvalid() {
         String email = "find@test.com";
 
         User user = new User();
@@ -258,14 +260,12 @@ class AuthServiceTest {
         when(loginEligibilityPolicy.isPasswordCheckAllowed(user)).thenReturn(true);
         when(passwordEncoder.matches("wrong-password", "encoded-secret")).thenReturn(false);
 
-        Optional<User> result = authService.login(email, "wrong-password");
-
-        assertFalse(result.isPresent());
+        assertThrows(InvalidCredentialsException.class, () -> authService.login(email, "wrong-password"));
         verify(passwordEncoder).matches("wrong-password", "encoded-secret");
     }
 
     @Test
-    void loginShouldReturnEmptyWhenUserIsDisabled() {
+    void loginShouldThrowWhenUserIsDisabled() {
         String email = "disabled@test.com";
         String password = "secret";
 
@@ -278,19 +278,15 @@ class AuthServiceTest {
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
         when(loginEligibilityPolicy.isPasswordCheckAllowed(user)).thenReturn(false);
 
-        Optional<User> result = authService.login(email, password);
-
-        assertFalse(result.isPresent());
+        assertThrows(InvalidCredentialsException.class, () -> authService.login(email, password));
         verifyNoInteractions(passwordEncoder);
     }
 
     @Test
-    void loginShouldReturnEmptyWhenUserNotFound() {
+    void loginShouldThrowWhenUserNotFound() {
         when(userRepository.findByEmail("unknown@test.com")).thenReturn(Optional.empty());
 
-        Optional<User> result = authService.login("unknown@test.com", "secret");
-
-        assertFalse(result.isPresent());
+        assertThrows(UserNotFoundException.class, () -> authService.login("unknown@test.com", "secret"));
     }
 
     @Test

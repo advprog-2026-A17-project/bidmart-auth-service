@@ -38,6 +38,7 @@ class ConfigCoverageTest {
         when(endpointRegistration.setAllowedOriginPatterns("*")).thenReturn(endpointRegistration);
         when(endpointRegistration.withSockJS()).thenReturn(sockJsServiceRegistration);
         when(messageBrokerRegistry.enableSimpleBroker("/topic", "/queue")).thenReturn(simpleBrokerRegistration);
+        when(simpleBrokerRegistration.setTaskScheduler(any())).thenReturn(simpleBrokerRegistration);
         when(simpleBrokerRegistration.setHeartbeatValue(any(long[].class))).thenReturn(simpleBrokerRegistration);
 
         webSocketConfig.registerStompEndpoints(stompEndpointRegistry);
