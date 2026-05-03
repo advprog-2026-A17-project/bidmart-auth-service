@@ -33,4 +33,7 @@ public class RefreshToken {
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
+
+    @Column(name = "device_info", nullable = false)
+    private String deviceInfo;
 }

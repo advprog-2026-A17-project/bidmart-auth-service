@@ -1,18 +1,36 @@
 package id.ac.ui.cs.advprog.bidmartauthservice.service;
 
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorSetupResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.Permission;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.EmailVerificationToken;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.PermissionRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.provisioning.WalletProvisioningOutboxService;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentity;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.oauth.OAuthIdentityVerifier;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.LoginEligibilityPolicy;
-
+import id.ac.ui.cs.advprog.bidmartauthservice.service.policy.PasswordPolicy;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -23,11 +41,28 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final PermissionRepository permissionRepository;
+    private final EmailVerificationTokenRepository emailVerificationTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthEventPublisher authEventPublisher;
     private final LoginEligibilityPolicy loginEligibilityPolicy;
+    private final PasswordPolicy passwordPolicy;
+    private final VerificationEmailSender verificationEmailSender;
+    private final VerificationTokenCodec verificationTokenCodec;
+    private final OAuthIdentityVerifier oauthIdentityVerifier;
+    private final WalletProvisioningOutboxService walletProvisioningOutboxService;
+    private final TwoFactorTotpService twoFactorTotpService;
+    private final AuthAuditOutboxService authAuditOutboxService;
 
+    @Value("${app.auth.email-verification.token-ttl-seconds:86400}")
+    private long verificationTokenTtlSeconds;
+
+    @Value("${app.auth.email-verification.resend-cooldown-seconds:60}")
+    private long resendCooldownSeconds;
+
+    @Transactional
     public User register(String email, String password, String roleName) {
+        passwordPolicy.validate(password);
 
         // cek apakah email sudah ada
         if (userRepository.findByEmail(email).isPresent()) {
@@ -45,21 +80,30 @@ public class AuthService {
                 .password(passwordEncoder.encode(password))
                 .enabled(true)
                 .emailVerified(false)
-                .verificationToken(UUID.randomUUID().toString())
-                .verificationTokenExpiresAt(Instant.now().plusSeconds(86400))
                 .roles(Set.of(role))
                 .build();
 
         User savedUser = userRepository.save(user);
+        issueVerificationToken(savedUser, Instant.now(), false);
+        walletProvisioningOutboxService.enqueueWalletProvisionRequested(savedUser);
         authEventPublisher.publishUserRegistered(savedUser);
         return savedUser;
     }
 
-    public Optional<User> login(String email, String password) {
-        return userRepository.findByEmail(email)
-                .filter(loginEligibilityPolicy::isPasswordCheckAllowed)
-                .filter(user -> passwordEncoder.matches(password, user.getPassword()))
-                .flatMap(loginEligibilityPolicy::resolveSuccessfulLogin);
+    public User login(String email, String password) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException("User with email " + email + " is not registered"));
+
+        if (!loginEligibilityPolicy.isPasswordCheckAllowed(user)) {
+            throw new InvalidCredentialsException("Login not allowed at this time");
+        }
+
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new InvalidCredentialsException("Incorrect password");
+        }
+
+        return loginEligibilityPolicy.resolveSuccessfulLogin(user)
+                .orElseThrow(() -> new InvalidCredentialsException("Could not complete login"));
     }
 
     public Optional<User> findByEmail(String email) {
@@ -85,27 +129,45 @@ public class AuthService {
     }
 
     public boolean verifyEmail(String token) {
-        return userRepository.findByVerificationToken(token)
-                .filter(user -> user.getVerificationTokenExpiresAt() != null &&
-                        user.getVerificationTokenExpiresAt().isAfter(Instant.now()))
-                .map(user -> {
-                    user.setEmailVerified(true);
-                    user.setVerificationToken(null);
-                    user.setVerificationTokenExpiresAt(null);
-                    userRepository.save(user);
-                    authEventPublisher.publishEmailVerified(user);
-                    return true;
-                })
-                .orElse(false);
+        Instant now = Instant.now();
+        String tokenHash = verificationTokenCodec.hashToken(token);
+
+        Optional<EmailVerificationToken> tokenRecord = emailVerificationTokenRepository
+                .findByTokenHashAndUsedAtIsNull(tokenHash);
+        if (tokenRecord.isEmpty()) {
+            return false;
+        }
+
+        EmailVerificationToken verificationToken = tokenRecord.get();
+        if (verificationToken.getExpiresAt() == null || !verificationToken.getExpiresAt().isAfter(now)) {
+            verificationToken.setUsedAt(now);
+            emailVerificationTokenRepository.save(verificationToken);
+            return false;
+        }
+
+        User user = verificationToken.getUser();
+        if (user == null || user.isEmailVerified()) {
+            verificationToken.setUsedAt(now);
+            emailVerificationTokenRepository.save(verificationToken);
+            return false;
+        }
+
+        user.setEmailVerified(true);
+        userRepository.save(user);
+
+        verificationToken.setUsedAt(now);
+        emailVerificationTokenRepository.save(verificationToken);
+        invalidateActiveTokens(user, now);
+
+        authEventPublisher.publishEmailVerified(user);
+        return true;
     }
 
     public void resendVerification(String email) {
         userRepository.findByEmail(email)
                 .filter(user -> !user.isEmailVerified())
                 .ifPresent(user -> {
-                    user.setVerificationToken(UUID.randomUUID().toString());
-                    user.setVerificationTokenExpiresAt(Instant.now().plusSeconds(86400));
-                    userRepository.save(user);
+                    issueVerificationToken(user, Instant.now(), true);
                 });
     }
 
@@ -114,14 +176,21 @@ public class AuthService {
             user.setEnabled(false);
             User savedUser = userRepository.save(user);
             authEventPublisher.publishUserDisabled(savedUser);
+            authAuditOutboxService.enqueueUserDisabled(savedUser);
             return savedUser;
         });
     }
 
-    public User oauthLogin(String provider, String providerUserId, String email, String displayName) {
-        Optional<User> existingUser = userRepository.findByEmail(email);
+    public User oauthLogin(String provider, String idToken) {
+        if (!oauthIdentityVerifier.supports(provider)) {
+            throw new UnsupportedOAuthProviderException("Unsupported OAuth provider");
+        }
+
+        OAuthIdentity identity = oauthIdentityVerifier.verify(idToken);
+        Optional<User> existingUser = userRepository.findByEmail(identity.email());
+
         if (existingUser.isPresent()) {
-            return existingUser.get();
+            return updateExistingOAuthUser(existingUser.get(), provider, identity);
         }
 
         Role buyerRole = roleRepository.findByName("BUYER")
@@ -132,19 +201,50 @@ public class AuthService {
 
         User user = User.builder()
                 .id(UUID.randomUUID())
-                .email(email)
+                .email(identity.email())
                 .password(passwordEncoder.encode(UUID.randomUUID().toString()))
                 .enabled(true)
                 .emailVerified(true)
                 .verificationToken(null)
                 .verificationTokenExpiresAt(null)
-                .oauthProvider(provider)
-                .oauthSubject(providerUserId)
-                .displayName(displayName)
+                .oauthProvider(provider.toLowerCase(Locale.ROOT))
+                .oauthSubject(identity.subject())
+                .displayName(identity.displayName())
+                .avatarUrl(identity.avatarUrl())
                 .roles(Set.of(buyerRole))
                 .build();
 
         return userRepository.save(user);
+    }
+
+    private User updateExistingOAuthUser(User existingUser, String provider, OAuthIdentity identity) {
+        boolean oauthAlreadyLinked = !isBlank(existingUser.getOauthProvider())
+                || !isBlank(existingUser.getOauthSubject());
+        if (oauthAlreadyLinked && !isMatchingOauthIdentity(existingUser, provider, identity)) {
+            throw new InvalidOAuthTokenException("Google account is not linked to this user");
+        }
+
+        existingUser.setOauthProvider(provider.toLowerCase(Locale.ROOT));
+        existingUser.setOauthSubject(identity.subject());
+        existingUser.setEmailVerified(true);
+
+        if (isBlank(existingUser.getDisplayName())) {
+            existingUser.setDisplayName(identity.displayName());
+        }
+        if (isBlank(existingUser.getAvatarUrl())) {
+            existingUser.setAvatarUrl(identity.avatarUrl());
+        }
+
+        return userRepository.save(existingUser);
+    }
+
+    private boolean isMatchingOauthIdentity(User user, String provider, OAuthIdentity identity) {
+        return provider.equalsIgnoreCase(user.getOauthProvider())
+                && identity.subject().equals(user.getOauthSubject());
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     public boolean hasPermission(String email, String permissionName) {
@@ -156,4 +256,124 @@ public class AuthService {
                         .anyMatch(permission -> permissionName.equals(permission.getName())))
                 .orElse(false);
     }
+
+    @Transactional
+    public TwoFactorSetupResponse setupTwoFactor(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        String secret = twoFactorTotpService.generateSecret();
+        user.setTwoFactorSecret(secret);
+        user.setTwoFactorEnabled(false);
+        userRepository.save(user);
+        return new TwoFactorSetupResponse(secret, twoFactorTotpService.buildOtpAuthUrl(email, secret));
+    }
+
+    @Transactional
+    public boolean verifyTwoFactor(String email, String code) {
+        return userRepository.findByEmail(email)
+                .filter(user -> twoFactorTotpService.isCodeValid(user.getTwoFactorSecret(), code))
+                .map(user -> {
+                    user.setTwoFactorEnabled(true);
+                    userRepository.save(user);
+                    return true;
+                })
+                .orElse(false);
+    }
+
+    public boolean verifyTwoFactorCode(String email, String code) {
+        return userRepository.findByEmail(email)
+                .filter(user -> twoFactorTotpService.isCodeValid(user.getTwoFactorSecret(), code))
+                .isPresent();
+    }
+
+    @Transactional
+    public boolean disableTwoFactor(String email, String code) {
+        return userRepository.findByEmail(email)
+                .filter(user -> user.isTwoFactorEnabled())
+                .filter(user -> twoFactorTotpService.isCodeValid(user.getTwoFactorSecret(), code))
+                .map(user -> {
+                    user.setTwoFactorEnabled(false);
+                    user.setTwoFactorSecret(null);
+                    userRepository.save(user);
+                    return true;
+                })
+                .orElse(false);
+    }
+
+    @Transactional
+    public Role createRole(String roleName, List<String> permissionNames) {
+        Set<Permission> permissions = new LinkedHashSet<>();
+        for (String permissionName : permissionNames) {
+            String normalizedPermission = permissionName.trim();
+            Permission permission = permissionRepository.findByName(normalizedPermission)
+                    .orElseGet(() -> permissionRepository.save(Permission.builder()
+                            .id(UUID.randomUUID())
+                            .name(normalizedPermission)
+                            .build()));
+            permissions.add(permission);
+        }
+
+        Role role = Role.builder()
+                .id(UUID.randomUUID())
+                .name(roleName.trim().toUpperCase(Locale.ROOT))
+                .permissions(permissions)
+                .build();
+        Role savedRole = roleRepository.save(role);
+        authAuditOutboxService.enqueueRoleCreated(savedRole);
+        return savedRole;
+    }
+
+    @Transactional
+    public Optional<User> assignUserRole(UUID userId, String roleName) {
+        Optional<User> user = userRepository.findById(userId);
+        if (user.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Role role = roleRepository.findByName(roleName.trim().toUpperCase(Locale.ROOT))
+                .orElseThrow(() -> new RoleNotFoundException("Role not found"));
+        User updatedUser = user.get();
+        updatedUser.setRoles(Set.of(role));
+        User savedUser = userRepository.save(updatedUser);
+        authAuditOutboxService.enqueueUserRoleChanged(savedUser, role);
+        return Optional.of(savedUser);
+    }
+
+    private void issueVerificationToken(User user, Instant now, boolean enforceCooldown) {
+        if (enforceCooldown && isWithinCooldownWindow(user, now)) {
+            return;
+        }
+
+        invalidateActiveTokens(user, now);
+
+        String rawToken = verificationTokenCodec.generateRawToken();
+        EmailVerificationToken token = EmailVerificationToken.builder()
+                .id(UUID.randomUUID())
+                .user(user)
+                .tokenHash(verificationTokenCodec.hashToken(rawToken))
+                .expiresAt(now.plusSeconds(verificationTokenTtlSeconds))
+                .createdAt(now)
+                .lastSentAt(now)
+                .build();
+
+        emailVerificationTokenRepository.save(token);
+        verificationEmailSender.sendVerificationEmail(user, rawToken);
+    }
+
+    private boolean isWithinCooldownWindow(User user, Instant now) {
+        return emailVerificationTokenRepository
+                .findFirstByUserAndUsedAtIsNullOrderByCreatedAtDesc(user)
+                .map(token -> token.getLastSentAt() != null
+                        && token.getLastSentAt().isAfter(now.minusSeconds(resendCooldownSeconds)))
+                .orElse(false);
+    }
+
+    private void invalidateActiveTokens(User user, Instant now) {
+        List<EmailVerificationToken> activeTokens = emailVerificationTokenRepository.findByUserAndUsedAtIsNull(user);
+        for (EmailVerificationToken activeToken : activeTokens) {
+            activeToken.setUsedAt(now);
+            emailVerificationTokenRepository.save(activeToken);
+        }
+    }
+
 }
