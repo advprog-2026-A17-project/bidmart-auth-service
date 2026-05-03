@@ -57,27 +57,25 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<Object> login(@Valid @RequestBody LoginRequest request) {
+    public ResponseEntity<Object> login(
+        @Valid @RequestBody LoginRequest request,
+        @RequestHeader(value = "User-Agent", defaultValue = "Unknown Device") String userAgent
+    ) {
         authRateLimiter.assertAllowed("login", request.email());
 
-        Optional<User> user = authService.login(
-                request.email(),
-                request.password()
-        );
+        User user = authService.login(request.email(), request.password());
 
-        if (user.isPresent()) {
-            User authenticatedUser = user.get();
-            if (authenticatedUser.isTwoFactorEnabled()) {
-                return ResponseEntity.ok(tokenService.issueTwoFactorChallenge(authenticatedUser));
-            }
-            return ResponseEntity.ok(tokenService.issueTokens(authenticatedUser));
+        if (user.isTwoFactorEnabled()) {
+            return ResponseEntity.ok(tokenService.issueTwoFactorChallenge(user));
         }
-
-        return ResponseEntity.status(401).body("Invalid credentials");
+        return ResponseEntity.ok(tokenService.issueTokens(user, userAgent));
     }
 
     @PostMapping("/2fa/login-verify")
-    public ResponseEntity<Object> verifyTwoFactorLogin(@Valid @RequestBody TwoFactorLoginVerifyRequest request) {
+    public ResponseEntity<Object> verifyTwoFactorLogin(
+        @Valid @RequestBody TwoFactorLoginVerifyRequest request,
+        @RequestHeader(value = "User-Agent", defaultValue = "Unknown Device") String userAgent
+    ) {
         authRateLimiter.assertAllowed("2fa-login-verify", request.challengeToken());
         User user = tokenService.verifyTwoFactorChallenge(request.challengeToken());
         
@@ -85,7 +83,7 @@ public class AuthController {
             return ResponseEntity.status(401).body(INVALID_TWO_FACTOR_CODE);
         }
         
-        return ResponseEntity.ok(tokenService.issueTokens(user));
+        return ResponseEntity.ok(tokenService.issueTokens(user, userAgent));
     }
 
     @PostMapping("/refresh")
@@ -159,12 +157,15 @@ public class AuthController {
     }
 
     @PostMapping("/oauth/login")
-    public ResponseEntity<TokenResponse> oauthLogin(@Valid @RequestBody OAuthLoginRequest request) {
+    public ResponseEntity<TokenResponse> oauthLogin(
+        @Valid @RequestBody OAuthLoginRequest request,
+        @RequestHeader(value = "User-Agent", defaultValue = "Unknown Device") String userAgent
+    ) {
         User user = authService.oauthLogin(
                 request.provider(),
                 request.idToken()
         );
-        return ResponseEntity.ok(tokenService.issueTokens(user));
+        return ResponseEntity.ok(tokenService.issueTokens(user, userAgent));
     }
 
     @GetMapping("/permissions/check")
