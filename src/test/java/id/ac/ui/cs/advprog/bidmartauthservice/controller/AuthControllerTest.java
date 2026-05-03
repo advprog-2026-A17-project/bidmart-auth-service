@@ -20,8 +20,10 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.AuthService;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.RedisSessionCacheService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.ratelimit.AuthRateLimiter;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RateLimitExceededException;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +41,8 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -60,6 +64,12 @@ class AuthControllerTest {
 
     @MockitoBean
     private AuthRateLimiter authRateLimiter;
+
+        @MockitoBean
+        private RefreshTokenRepository refreshTokenRepository;
+
+        @MockitoBean
+        private RedisSessionCacheService redisSessionCacheService;
 
         @Autowired
         private ObjectMapper objectMapper;
@@ -109,7 +119,7 @@ class AuthControllerTest {
 
         when(authService.login("buyer@test.com", "pass"))
                 .thenReturn(Optional.of(user));
-        when(tokenService.issueTokens(user)).thenReturn(new TokenResponse(
+        when(tokenService.issueTokens(user, "Unknown Device")).thenReturn(new TokenResponse(
                 "access-token",
                 "refresh-token",
                 "Bearer",
@@ -152,7 +162,7 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.challengeToken").value("challenge-token"))
                 .andExpect(jsonPath("$.twoFactorRequired").value(true));
 
-        verify(tokenService, never()).issueTokens(user);
+        verify(tokenService, never()).issueTokens(eq(user), anyString());
     }
 
     @Test
@@ -164,7 +174,7 @@ class AuthControllerTest {
 
         when(tokenService.verifyTwoFactorChallenge("challenge-token")).thenReturn(user);
         when(authService.verifyTwoFactorCode("buyer@test.com", "123456")).thenReturn(true);
-        when(tokenService.issueTokens(user)).thenReturn(new TokenResponse(
+        when(tokenService.issueTokens(user, "Unknown Device")).thenReturn(new TokenResponse(
                 "access-token",
                 "refresh-token",
                 "Bearer",
@@ -196,7 +206,7 @@ class AuthControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().string("Invalid two factor code"));
 
-        verify(tokenService, never()).issueTokens(user);
+        verify(tokenService, never()).issueTokens(eq(user), anyString());
     }
 
     @Test
@@ -453,7 +463,7 @@ class AuthControllerTest {
     @Test
     void getSessionsShouldReturnActiveSessionsForUser() throws Exception {
         when(tokenService.listActiveSessions("buyer@test.com")).thenReturn(List.of(
-                new SessionResponse(UUID.randomUUID(), "buyer@test.com", false, "2099-01-01T00:00:00Z")
+                new SessionResponse(UUID.randomUUID(), "buyer@test.com", false, "2099-01-01T00:00:00Z", "Google Chrome")
         ));
 
         mockMvc.perform(get("/api/v1/auth/sessions")
@@ -490,7 +500,7 @@ class AuthControllerTest {
 
         when(authService.oauthLogin("google", "google-id-token"))
                 .thenReturn(user);
-        when(tokenService.issueTokens(user)).thenReturn(new TokenResponse(
+        when(tokenService.issueTokens(user, "Unknown Device")).thenReturn(new TokenResponse(
                 "oauth-access-token",
                 "oauth-refresh-token",
                 "Bearer",

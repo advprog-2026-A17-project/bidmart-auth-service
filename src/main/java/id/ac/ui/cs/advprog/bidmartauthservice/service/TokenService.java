@@ -7,6 +7,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorChallengeResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidRefreshTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidTwoFactorChallengeException;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.RefreshToken;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.TwoFactorChallenge;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
@@ -29,6 +30,7 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class TokenService {
@@ -42,6 +44,8 @@ public class TokenService {
     private final TwoFactorChallengeRepository twoFactorChallengeRepository;
     private final UserRepository userRepository;
     private final AuthAuditOutboxService authAuditOutboxService;
+    private final RedisSessionCacheService redisSessionCacheService;
+    private final SessionRevokePublisher sessionRevokePublisher;
 
     @Value("${app.auth.jwt.access-ttl-seconds:900}")
     private long accessTokenExpirySeconds;
@@ -59,16 +63,25 @@ public class TokenService {
             RefreshTokenRepository refreshTokenRepository,
             TwoFactorChallengeRepository twoFactorChallengeRepository,
             UserRepository userRepository,
-            AuthAuditOutboxService authAuditOutboxService) {
+            AuthAuditOutboxService authAuditOutboxService,
+            RedisSessionCacheService redisSessionCacheService,
+            SessionRevokePublisher sessionRevokePublisher) {
         this.refreshTokenRepository = refreshTokenRepository;
         this.twoFactorChallengeRepository = twoFactorChallengeRepository;
         this.userRepository = userRepository;
         this.authAuditOutboxService = authAuditOutboxService;
+        this.redisSessionCacheService = redisSessionCacheService;
+        this.sessionRevokePublisher = sessionRevokePublisher;
     }
 
-    public TokenResponse issueTokens(User user) {
-        String accessToken = generateAccessToken(user);
-        TokenResponse refreshOnlyResponse = generateRefreshToken(user);
+    public TokenResponse issueTokens(User user, String userAgent) {
+        UUID tokenId = UUID.randomUUID();
+
+        String accessToken = generateAccessToken(user, tokenId); 
+        TokenResponse refreshOnlyResponse = generateRefreshToken(user, userAgent, tokenId);
+
+        // Cache the session token in Redis for fast validation
+        redisSessionCacheService.cacheSessionToken(tokenId);
 
         return new TokenResponse(
                 accessToken,
@@ -110,10 +123,9 @@ public class TokenService {
         return challenge.getUser();
     }
 
-    public TokenResponse generateRefreshToken(User user) {
+    public TokenResponse generateRefreshToken(User user, String userAgent, UUID tokenId) {
         enforceConcurrentSessionLimit(user);
 
-        UUID tokenId = UUID.randomUUID();
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plusSeconds(refreshTokenExpirySeconds);
         String refreshToken = Jwts.builder()
@@ -132,6 +144,7 @@ public class TokenService {
                 .expiresAt(expiresAt)
                 .revoked(false)
                 .createdAt(issuedAt)
+                .deviceInfo(simplifyUserAgent(userAgent))
                 .build();
         refreshTokenRepository.save(refreshTokenEntity);
 
@@ -158,7 +171,7 @@ public class TokenService {
         refreshTokenEntity.setRevoked(true);
         refreshTokenRepository.save(refreshTokenEntity);
 
-        return issueTokens(refreshTokenEntity.getUser());
+        return issueTokens(refreshTokenEntity.getUser(), refreshTokenEntity.getDeviceInfo());
     }
 
     public void revokeRefreshToken(String refreshToken) {
@@ -168,6 +181,10 @@ public class TokenService {
             refreshTokenRepository.findByTokenIdAndRevokedFalse(tokenId).ifPresent(token -> {
                 token.setRevoked(true);
                 refreshTokenRepository.save(token);
+                
+                // Remove from Redis cache and notify client
+                redisSessionCacheService.revokeSessionToken(tokenId);
+                sessionRevokePublisher.publishSessionRevoked(tokenId, "USER_LOGOUT");
             });
         } catch (RuntimeException ignored) {
             // idempotent revoke behavior
@@ -186,6 +203,11 @@ public class TokenService {
         refreshTokenRepository.findByTokenIdAndRevokedFalse(tokenId).ifPresent(token -> {
             token.setRevoked(true);
             refreshTokenRepository.save(token);
+            
+            // Remove from Redis cache and notify client
+            redisSessionCacheService.revokeSessionToken(tokenId);
+            sessionRevokePublisher.publishSessionRevoked(tokenId, "ADMIN_REVOKE");
+            
             authAuditOutboxService.enqueueSessionRevoked(token);
         });
     }
@@ -195,18 +217,23 @@ public class TokenService {
         for (RefreshToken session : activeSessions) {
             session.setRevoked(true);
             refreshTokenRepository.save(session);
+            
+            // Remove from Redis and notify all clients
+            redisSessionCacheService.revokeSessionToken(session.getTokenId());
+            sessionRevokePublisher.publishSessionRevoked(session.getTokenId(), "USER_DISABLED");
         }
     }
-
-    private String generateAccessToken(User user) {
+    
+    private String generateAccessToken(User user, UUID tokenId) {
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plusSeconds(accessTokenExpirySeconds);
 
         return Jwts.builder()
                 .subject(user.getId().toString())
                 .claim("email", user.getEmail())
-                .claim("roles", user.getRoles().stream().map(role -> role.getName()).toList())
+                .claim("roles", user.getRoles().stream().map(Role::getName).toList())
                 .claim("type", TOKEN_TYPE_ACCESS)
+                .claim("tokenId", tokenId.toString())
                 .issuedAt(Date.from(issuedAt))
                 .expiration(Date.from(expiresAt))
                 .signWith(getSigningKey())
@@ -228,6 +255,10 @@ public class TokenService {
                 .ifPresent(oldestSession -> {
                     oldestSession.setRevoked(true);
                     refreshTokenRepository.save(oldestSession);
+                    
+                    // Revoke from Redis and notify oldest session's client
+                    redisSessionCacheService.revokeSessionToken(oldestSession.getTokenId());
+                    sessionRevokePublisher.publishSessionRevoked(oldestSession.getTokenId(), "CONCURRENT_SESSION_LIMIT");
                 });
     }
 
@@ -256,5 +287,15 @@ public class TokenService {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 algorithm not available", e);
         }
+    }
+
+    private String simplifyUserAgent(String userAgent) {
+        if (userAgent == null || userAgent.isBlank()) return "Unknown Device";
+        if (userAgent.contains("Chrome") && !userAgent.contains("Edg")) return "Google Chrome";
+        if (userAgent.contains("Firefox")) return "Mozilla Firefox";
+        if (userAgent.contains("Safari") && !userAgent.contains("Chrome")) return "Apple Safari";
+        if (userAgent.contains("Edg")) return "Microsoft Edge";
+        if (userAgent.contains("Postman")) return "Postman";
+        return userAgent;
     }
 }

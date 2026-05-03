@@ -8,6 +8,8 @@ import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.TwoFactorChallengeRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.RedisSessionCacheService;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.SessionRevokePublisher;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -44,6 +46,12 @@ class TokenServiceTest {
     @Mock
     private AuthAuditOutboxService authAuditOutboxService;
 
+        @Mock
+        private RedisSessionCacheService redisSessionCacheService;
+
+        @Mock
+        private SessionRevokePublisher sessionRevokePublisher;
+
     @InjectMocks
     private TokenService tokenService;
 
@@ -66,7 +74,7 @@ class TokenServiceTest {
         when(refreshTokenRepository.save(any(RefreshToken.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        TokenResponse response = tokenService.issueTokens(user);
+        TokenResponse response = tokenService.issueTokens(user, "Unit Test Browser");
 
         assertNotNull(response.accessToken());
         assertNotNull(response.refreshToken());
@@ -99,7 +107,10 @@ class TokenServiceTest {
         when(refreshTokenRepository.save(any(RefreshToken.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        TokenResponse response = tokenService.refreshTokens(tokenService.generateRefreshToken(user).refreshToken());
+        UUID refreshTokenId = UUID.randomUUID();
+        TokenResponse response = tokenService.refreshTokens(
+                tokenService.generateRefreshToken(user, "Unit Test Browser", refreshTokenId).refreshToken()
+        );
 
         assertNotNull(response.accessToken());
         assertNotNull(response.refreshToken());
@@ -127,7 +138,9 @@ class TokenServiceTest {
         when(refreshTokenRepository.findByTokenIdAndRevokedFalse(any(UUID.class)))
                 .thenReturn(Optional.of(existing));
 
-        tokenService.revokeRefreshToken(tokenService.generateRefreshToken(user).refreshToken());
+        tokenService.revokeRefreshToken(
+                tokenService.generateRefreshToken(user, "Unit Test Browser", UUID.randomUUID()).refreshToken()
+        );
 
         assertTrue(existing.isRevoked());
         verify(refreshTokenRepository).save(existing);
@@ -147,6 +160,8 @@ class TokenServiceTest {
                 .user(user)
                 .expiresAt(Instant.now().plusSeconds(1800))
                 .revoked(false)
+                .createdAt(Instant.now().minusSeconds(30))
+                .deviceInfo("Unit Test Browser")
                 .build();
 
         when(userRepository.findByEmail("token@test.com")).thenReturn(Optional.of(user));
@@ -265,7 +280,7 @@ class TokenServiceTest {
         when(refreshTokenRepository.save(any(RefreshToken.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        TokenResponse response = tokenService.generateRefreshToken(user);
+        TokenResponse response = tokenService.generateRefreshToken(user, "Unit Test Browser", UUID.randomUUID());
 
         assertNotNull(response.refreshToken());
         assertTrue(oldestSession.isRevoked());
