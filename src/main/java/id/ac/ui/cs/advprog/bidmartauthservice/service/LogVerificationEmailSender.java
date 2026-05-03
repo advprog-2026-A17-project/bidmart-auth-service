@@ -14,7 +14,7 @@ public class LogVerificationEmailSender implements VerificationEmailSender {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LogVerificationEmailSender.class);
 
-    @Value("${app.auth.email-verification.base-url:http://localhost:3000/verify-email}")
+    @Value("${app.auth.email-verification.base-url:http://localhost/verify-email}")
     private String verificationBaseUrl;
 
     @Override
