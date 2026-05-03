@@ -11,6 +11,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenR
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.PermissionRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.UserNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.provisioning.WalletProvisioningOutboxService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxService;
@@ -41,6 +42,9 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -635,6 +639,127 @@ class AuthServiceTest {
 
         assertTrue(authService.hasPermission("rbac@test.com", "bid:place"));
         assertFalse(authService.hasPermission("rbac@test.com", "auction:create"));
+    }
+
+    @Test
+    void oauthLoginShouldLinkExistingUserWhenEmailMatches() {
+        String email = "existing@test.com";
+        User existingUser = User.builder()
+                .email(email)
+                .oauthProvider(null) // Not linked yet
+                .oauthSubject(null)
+                .build();
+        OAuthIdentity identity = new OAuthIdentity("google-sub", email, "New Name", "new-avatar");
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(existingUser));
+        when(oauthIdentityVerifier.supports("google")).thenReturn(true);
+        when(oauthIdentityVerifier.verify("token")).thenReturn(identity);
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        User result = authService.oauthLogin("google", "token");
+
+        assertEquals("google", result.getOauthProvider());
+        assertEquals("google-sub", result.getOauthSubject());
+        assertTrue(result.isEmailVerified());
+        assertEquals("New Name", result.getDisplayName());
+    }
+
+    @Test
+    void oauthLoginShouldThrowWhenOauthIdentityMismatches() {
+        String email = "linked@test.com";
+        User linkedUser = User.builder()
+                .email(email)
+                .oauthProvider("google")
+                .oauthSubject("original-sub")
+                .build();
+        OAuthIdentity mismatchIdentity = new OAuthIdentity("hacker-sub", email, "Name", "url");
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(linkedUser));
+        when(oauthIdentityVerifier.supports("google")).thenReturn(true);
+        when(oauthIdentityVerifier.verify("token")).thenReturn(mismatchIdentity);
+
+        assertThrows(InvalidOAuthTokenException.class, () -> authService.oauthLogin("google", "token"));
+    }
+
+    @Test
+    void verifyEmailShouldReturnFalseWhenTokenExpired() {
+        String token = "expired-token";
+        String hash = "hash";
+        when(verificationTokenCodec.hashToken(token)).thenReturn(hash);
+        EmailVerificationToken expiredToken = EmailVerificationToken.builder()
+                .expiresAt(Instant.now().minusSeconds(3600)) // 1 hour ago
+                .build();
+
+        when(emailVerificationTokenRepository.findByTokenHashAndUsedAtIsNull(hash))
+                .thenReturn(Optional.of(expiredToken));
+
+        assertFalse(authService.verifyEmail(token));
+        assertNotNull(expiredToken.getUsedAt());
+        verify(emailVerificationTokenRepository).save(expiredToken);
+    }
+
+    @Test
+    void verifyEmailShouldReturnFalseWhenUserAlreadyVerified() {
+        String token = "valid-token";
+        String hash = "hash";
+        User user = User.builder().emailVerified(true).build();
+        EmailVerificationToken tokenRecord = EmailVerificationToken.builder()
+                .user(user)
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+
+        when(verificationTokenCodec.hashToken(token)).thenReturn(hash);
+        when(emailVerificationTokenRepository.findByTokenHashAndUsedAtIsNull(hash))
+                .thenReturn(Optional.of(tokenRecord));
+
+        assertFalse(authService.verifyEmail(token));
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void hasPermissionShouldHandleNullPermissionsSafely() {
+        Role roleWithNoPerms = Role.builder().permissions(null).build(); // Triggers empty stream lambda
+        User user = User.builder().roles(Set.of(roleWithNoPerms)).build();
+
+        when(userRepository.findByEmail("test@test.com")).thenReturn(Optional.of(user));
+
+        assertFalse(authService.hasPermission("test@test.com", "any:perm"));
+    }
+
+    @Test
+    void assignUserRoleShouldReturnEmptyWhenUserNotFound() {
+        UUID userId = UUID.randomUUID();
+        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+
+        Optional<User> result = authService.assignUserRole(userId, "ADMIN");
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void verifyTwoFactorCodeShouldReturnBooleanWithoutEnablingFeature() {
+        User user = User.builder().twoFactorSecret("SECRET").build();
+        when(userRepository.findByEmail("2fa@test.com")).thenReturn(Optional.of(user));
+        
+        // Test valid and invalid
+        assertTrue(authService.verifyTwoFactorCode("2fa@test.com", currentTotp("SECRET")));
+        assertFalse(authService.verifyTwoFactorCode("2fa@test.com", "000000"));
+    }
+
+    @Test
+    void resendVerificationShouldRespectCooldown() {
+        User user = User.builder().emailVerified(false).build();
+        EmailVerificationToken recentToken = EmailVerificationToken.builder()
+                .lastSentAt(Instant.now().minusSeconds(10)) // Only 10s ago, cooldown is 60s
+                .build();
+
+        when(userRepository.findByEmail("test@test.com")).thenReturn(Optional.of(user));
+        when(emailVerificationTokenRepository.findFirstByUserAndUsedAtIsNullOrderByCreatedAtDesc(user))
+                .thenReturn(Optional.of(recentToken));
+
+        authService.resendVerification("test@test.com");
+
+        verify(verificationEmailSender, never()).sendVerificationEmail(any(), anyString());
     }
 
     private String sha256Hex(String input) {
