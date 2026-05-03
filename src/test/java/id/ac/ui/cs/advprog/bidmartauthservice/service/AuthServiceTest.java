@@ -9,6 +9,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.PermissionRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.TwoFactorChallengeRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
@@ -91,7 +92,7 @@ class AuthServiceTest {
     private AuthAuditOutboxService authAuditOutboxService;
 
     @Spy
-    private TwoFactorTotpService twoFactorTotpService = new TwoFactorTotpService();
+    private TwoFactorTotpService twoFactorTotpService = new TwoFactorTotpService(mock(TwoFactorChallengeRepository.class));
 
     @InjectMocks
     private AuthService authService;
@@ -646,7 +647,7 @@ class AuthServiceTest {
         String email = "existing@test.com";
         User existingUser = User.builder()
                 .email(email)
-                .oauthProvider(null) // Not linked yet
+                .oauthProvider(null)
                 .oauthSubject(null)
                 .build();
         OAuthIdentity identity = new OAuthIdentity("google-sub", email, "New Name", "new-avatar");
@@ -687,7 +688,7 @@ class AuthServiceTest {
         String hash = "hash";
         when(verificationTokenCodec.hashToken(token)).thenReturn(hash);
         EmailVerificationToken expiredToken = EmailVerificationToken.builder()
-                .expiresAt(Instant.now().minusSeconds(3600)) // 1 hour ago
+                .expiresAt(Instant.now().minusSeconds(3600))
                 .build();
 
         when(emailVerificationTokenRepository.findByTokenHashAndUsedAtIsNull(hash))
@@ -718,7 +719,7 @@ class AuthServiceTest {
 
     @Test
     void hasPermissionShouldHandleNullPermissionsSafely() {
-        Role roleWithNoPerms = Role.builder().permissions(null).build(); // Triggers empty stream lambda
+        Role roleWithNoPerms = Role.builder().permissions(null).build();
         User user = User.builder().roles(Set.of(roleWithNoPerms)).build();
 
         when(userRepository.findByEmail("test@test.com")).thenReturn(Optional.of(user));
@@ -741,7 +742,6 @@ class AuthServiceTest {
         User user = User.builder().twoFactorSecret("SECRET").build();
         when(userRepository.findByEmail("2fa@test.com")).thenReturn(Optional.of(user));
         
-        // Test valid and invalid
         assertTrue(authService.verifyTwoFactorCode("2fa@test.com", currentTotp("SECRET")));
         assertFalse(authService.verifyTwoFactorCode("2fa@test.com", "000000"));
     }
@@ -750,7 +750,7 @@ class AuthServiceTest {
     void resendVerificationShouldRespectCooldown() {
         User user = User.builder().emailVerified(false).build();
         EmailVerificationToken recentToken = EmailVerificationToken.builder()
-                .lastSentAt(Instant.now().minusSeconds(10)) // Only 10s ago, cooldown is 60s
+                .lastSentAt(Instant.now().minusSeconds(10))
                 .build();
 
         when(userRepository.findByEmail("test@test.com")).thenReturn(Optional.of(user));
