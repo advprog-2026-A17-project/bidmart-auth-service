@@ -54,3 +54,31 @@ Base path: `/api/v1/auth`
 - Verification tokens are random opaque values and are stored hashed server-side.
 - A token is one-time use and becomes invalid once consumed.
 - Resending verification invalidates prior active tokens and issues a fresh token.
+
+## Domain Event Contract (Wallet Provisioning)
+
+- Event type: `WalletProvisionRequested.v1`
+- Trigger: successful user registration commit
+- Delivery pattern: transactional outbox + asynchronous broker publisher
+
+### Payload
+```json
+{
+  "eventId": "uuid",
+  "userId": "uuid",
+  "email": "user@example.com",
+  "occurredAt": "2026-04-16T13:00:00Z",
+  "source": "bidmart-auth-service"
+}
+```
+
+### Retry / idempotency / failure handling
+
+- Auth service stores events in `auth_outbox_events` in the same transaction as user creation.
+- Publisher retries failed deliveries with exponential backoff.
+- Event transitions:
+  - `PENDING` -> first delivery attempt pending
+  - `RETRY` -> delivery failed and scheduled for retry
+  - `PUBLISHED` -> broker accepted the event
+  - `FAILED` -> max attempts exceeded
+- Consumers must treat `eventId` (or `userId`) as idempotency keys and handle duplicates safely.

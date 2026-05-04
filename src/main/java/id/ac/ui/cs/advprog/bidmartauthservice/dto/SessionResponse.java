@@ -10,14 +10,16 @@ public record SessionResponse(
         UUID tokenId,
         String email,
         boolean revoked,
-        String expiresAt
+        String createdAt,
+        String deviceInfo
 ) {
     public static SessionResponse fromRefreshToken(RefreshToken refreshToken) {
         return new SessionResponse(
                 refreshToken.getTokenId(),
                 refreshToken.getUser().getEmail(),
                 refreshToken.isRevoked(),
-                DateTimeFormatter.ISO_INSTANT.format(refreshToken.getExpiresAt().atOffset(ZoneOffset.UTC))
+                DateTimeFormatter.ISO_INSTANT.format(refreshToken.getCreatedAt().atOffset(ZoneOffset.UTC)),
+                refreshToken.getDeviceInfo()
         );
     }
 }

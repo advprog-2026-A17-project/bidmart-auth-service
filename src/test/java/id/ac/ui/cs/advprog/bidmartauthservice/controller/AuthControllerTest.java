@@ -7,23 +7,31 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.SessionResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorChallengeResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.OAuthLoginRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.UpdateProfileRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.VerifyEmailRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.RateLimitExceededException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UserNotFoundException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.Permission;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.Role;
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.AuthService;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.RedisSessionCacheService;
+import id.ac.ui.cs.advprog.bidmartauthservice.service.ratelimit.AuthRateLimiter;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.RefreshTokenRepository;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Optional;
@@ -32,23 +40,42 @@ import java.util.UUID;
 import java.util.List;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import org.springframework.context.annotation.Import;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.GlobalExceptionHandler;
+
 @WebMvcTest(AuthController.class)
+@Import(GlobalExceptionHandler.class)
 @Tag("unit")
 class AuthControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
-    @MockBean
+    @MockitoBean
     private AuthService authService;
 
-    @MockBean
+    @MockitoBean
     private TokenService tokenService;
+
+    @MockitoBean
+    private AuthRateLimiter authRateLimiter;
+
+        @MockitoBean
+        private RefreshTokenRepository refreshTokenRepository;
+
+        @MockitoBean
+        private RedisSessionCacheService redisSessionCacheService;
 
         @Autowired
         private ObjectMapper objectMapper;
@@ -97,8 +124,8 @@ class AuthControllerTest {
         user.setRoles(Set.of(buyerRole));
 
         when(authService.login("buyer@test.com", "pass"))
-                .thenReturn(Optional.of(user));
-        when(tokenService.issueTokens(user)).thenReturn(new TokenResponse(
+                .thenReturn(user);
+        when(tokenService.issueTokens(user, "Unknown Device")).thenReturn(new TokenResponse(
                 "access-token",
                 "refresh-token",
                 "Bearer",
@@ -120,9 +147,78 @@ class AuthControllerTest {
     }
 
     @Test
+    void loginShouldReturnTwoFactorChallengeWhenEnabled() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("buyer@test.com");
+        user.setPassword("pass");
+        user.setEnabled(true);
+        user.setTwoFactorEnabled(true);
+
+        when(authService.login("buyer@test.com", "pass")).thenReturn(user);
+        when(tokenService.issueTwoFactorChallenge(user))
+                .thenReturn(new TwoFactorChallengeResponse("challenge-token"));
+
+        LoginRequest request = new LoginRequest("buyer@test.com", "pass");
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.challengeToken").value("challenge-token"))
+                .andExpect(jsonPath("$.twoFactorRequired").value(true));
+
+        verify(tokenService, never()).issueTokens(eq(user), anyString());
+    }
+
+    @Test
+    void verifyTwoFactorLoginShouldIssueTokensWhenCodeValid() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("buyer@test.com");
+        user.setEnabled(true);
+
+        when(tokenService.verifyTwoFactorChallenge("challenge-token")).thenReturn(user);
+        when(authService.verifyTwoFactorCode("buyer@test.com", "123456")).thenReturn(true);
+        when(tokenService.issueTokens(user, "Unknown Device")).thenReturn(new TokenResponse(
+                "access-token",
+                "refresh-token",
+                "Bearer",
+                900,
+                null
+        ));
+
+        mockMvc.perform(post("/api/v1/auth/2fa/login-verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"challengeToken\":\"challenge-token\",\"code\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").value("access-token"))
+                .andExpect(jsonPath("$.refreshToken").value("refresh-token"));
+    }
+
+    @Test
+    void verifyTwoFactorLoginShouldRejectInvalidCode() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("buyer@test.com");
+        user.setEnabled(true);
+
+        when(tokenService.verifyTwoFactorChallenge("challenge-token")).thenReturn(user);
+        when(authService.verifyTwoFactorCode("buyer@test.com", "000000")).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/auth/2fa/login-verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"challengeToken\":\"challenge-token\",\"code\":\"000000\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string("Invalid two factor code"));
+
+        verify(tokenService, never()).issueTokens(eq(user), anyString());
+    }
+
+    @Test
     void loginShouldReturnUnauthorizedWhenCredentialsInvalid() throws Exception {
         when(authService.login("buyer@test.com", "wrong"))
-                .thenReturn(Optional.empty());
+                .thenThrow(new InvalidCredentialsException("Incorrect password"));
 
         LoginRequest request = new LoginRequest("buyer@test.com", "wrong");
 
@@ -130,7 +226,8 @@ class AuthControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isUnauthorized())
-                .andExpect(content().string("Invalid credentials"));
+                .andExpect(jsonPath("$.error").value("INVALID_CREDENTIALS"))
+                .andExpect(jsonPath("$.message").value("Incorrect password"));
     }
 
     @Test
@@ -145,6 +242,22 @@ class AuthControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("Email not verified"));
+    }
+
+    @Test
+    void loginShouldReturnTooManyRequestsWhenRateLimited() throws Exception {
+        doThrow(new RateLimitExceededException("Too many authentication attempts"))
+                .when(authRateLimiter).assertAllowed("login", "buyer@test.com");
+
+        LoginRequest request = new LoginRequest("buyer@test.com", "pass");
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many authentication attempts"));
+
+        verify(authService, never()).login("buyer@test.com", "pass");
     }
 
     @Test
@@ -165,6 +278,22 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").value("new-access-token"))
                 .andExpect(jsonPath("$.refreshToken").value("new-refresh-token"));
+    }
+
+    @Test
+    void refreshShouldReturnTooManyRequestsWhenRateLimited() throws Exception {
+        doThrow(new RateLimitExceededException("Too many authentication attempts"))
+                .when(authRateLimiter).assertAllowed("refresh", "refresh-token");
+
+        RefreshTokenRequest request = new RefreshTokenRequest("refresh-token");
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many authentication attempts"));
+
+        verify(tokenService, never()).refreshTokens("refresh-token");
     }
 
     @Test
@@ -341,7 +470,7 @@ class AuthControllerTest {
     @Test
     void getSessionsShouldReturnActiveSessionsForUser() throws Exception {
         when(tokenService.listActiveSessions("buyer@test.com")).thenReturn(List.of(
-                new SessionResponse(UUID.randomUUID(), "buyer@test.com", false, "2099-01-01T00:00:00Z")
+                new SessionResponse(UUID.randomUUID(), "buyer@test.com", false, "2099-01-01T00:00:00Z", "Google Chrome")
         ));
 
         mockMvc.perform(get("/api/v1/auth/sessions")
@@ -354,9 +483,11 @@ class AuthControllerTest {
     @Test
     void disableUserShouldReturnNoContentWhenUserDisabled() throws Exception {
         when(authService.disableUser("buyer@test.com")).thenReturn(Optional.of(new User()));
+        when(authService.hasPermission("admin@test.com", "admin:*")).thenReturn(true);
 
         mockMvc.perform(post("/api/v1/auth/admin/disable-user")
-                .param("email", "buyer@test.com"))
+                .param("email", "buyer@test.com")
+                .requestAttr("userEmail", "admin@test.com"))
                 .andExpect(status().isNoContent());
     }
 
@@ -376,7 +507,7 @@ class AuthControllerTest {
 
         when(authService.oauthLogin("google", "google-id-token"))
                 .thenReturn(user);
-        when(tokenService.issueTokens(user)).thenReturn(new TokenResponse(
+        when(tokenService.issueTokens(user, "Unknown Device")).thenReturn(new TokenResponse(
                 "oauth-access-token",
                 "oauth-refresh-token",
                 "Bearer",
@@ -434,5 +565,110 @@ class AuthControllerTest {
                         .param("permission", "bid:place"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.allowed").value(true));
+    }
+
+    @Test
+    void setupTwoFactorShouldReturnSecretAndQrCodeUrl() throws Exception {
+        when(authService.setupTwoFactor("buyer@test.com"))
+                .thenReturn(new id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorSetupResponse(
+                        "JBSWY3DPEHPK3PXP",
+                        "otpauth://totp/BidMart:buyer@test.com?secret=JBSWY3DPEHPK3PXP&issuer=BidMart"
+                ));
+
+        mockMvc.perform(post("/api/v1/auth/2fa/setup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"buyer@test.com\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.secret").value("JBSWY3DPEHPK3PXP"))
+                .andExpect(jsonPath("$.qrCodeUrl").value("otpauth://totp/BidMart:buyer@test.com?secret=JBSWY3DPEHPK3PXP&issuer=BidMart"));
+    }
+
+    @Test
+    void verifyTwoFactorShouldActivateFeature() throws Exception {
+        when(authService.verifyTwoFactor("buyer@test.com", "123456")).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/auth/2fa/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"buyer@test.com\",\"code\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true));
+    }
+
+    @Test
+    void verifyTwoFactorShouldReturnTooManyRequestsWhenRateLimited() throws Exception {
+        doThrow(new RateLimitExceededException("Too many authentication attempts"))
+                .when(authRateLimiter).assertAllowed("2fa-verify", "buyer@test.com");
+
+        mockMvc.perform(post("/api/v1/auth/2fa/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"buyer@test.com\",\"code\":\"123456\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many authentication attempts"));
+
+        verify(authService, never()).verifyTwoFactor("buyer@test.com", "123456");
+    }
+
+    @Test
+    void disableTwoFactorShouldTurnOffFeature() throws Exception {
+        when(authService.disableTwoFactor("buyer@test.com", "123456")).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/auth/2fa/disable")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"buyer@test.com\",\"code\":\"123456\"}"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void createRoleShouldReturnRoleWithPermissions() throws Exception {
+        Permission bidPlace = Permission.builder().id(UUID.randomUUID()).name("bid:place").build();
+        Role bidder = Role.builder()
+                .id(UUID.randomUUID())
+                .name("BIDDER")
+                .permissions(Set.of(bidPlace))
+                .build();
+
+        when(authService.createRole("BIDDER", List.of("bid:place"))).thenReturn(bidder);
+        when(authService.hasPermission("admin@test.com", "admin:*")).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/auth/roles")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .requestAttr("userEmail", "admin@test.com")
+                        .content("{\"name\":\"BIDDER\",\"permissions\":[\"bid:place\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("BIDDER"))
+                .andExpect(jsonPath("$.permissions[0]").value("bid:place"));
+    }
+
+    @Test
+    void assignUserRoleShouldReturnUpdatedUser() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Role sellerRole = Role.builder().id(UUID.randomUUID()).name("SELLER").build();
+        User user = User.builder()
+                .id(userId)
+                .email("seller@test.com")
+                .enabled(true)
+                .roles(Set.of(sellerRole))
+                .build();
+
+        when(authService.assignUserRole(userId, "SELLER")).thenReturn(Optional.of(user));
+        when(authService.hasPermission("admin@test.com", "admin:*")).thenReturn(true);
+
+        mockMvc.perform(put("/api/v1/auth/users/{userId}/roles", userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .requestAttr("userEmail", "admin@test.com")
+                        .content("{\"role\":\"SELLER\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("seller@test.com"))
+                .andExpect(jsonPath("$.roles[0].name").value("SELLER"));
+    }
+
+    @Test
+    void revokeSessionShouldReturnNoContent() throws Exception {
+        UUID sessionId = UUID.randomUUID();
+
+        mockMvc.perform(delete("/api/v1/auth/sessions/{sessionId}", sessionId))
+                .andExpect(status().isNoContent());
+
+        verify(tokenService).revokeSessionByTokenId(sessionId);
     }
 }
