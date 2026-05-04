@@ -46,4 +46,24 @@ class SmtpVerificationEmailSenderTest {
         assertEquals("Verify your BidMart account", message.getSubject());
         assertTrue(message.getText().contains("https://app.bidmart.dev/verify-email?token=raw-token-123"));
     }
+
+    @Test
+    void sendVerificationEmailShouldNotPropagateExceptionOnSmtpFailure() {
+        SmtpVerificationEmailSender sender = new SmtpVerificationEmailSender(mailSender);
+        ReflectionTestUtils.setField(sender, "verificationBaseUrl", "https://app.bidmart.dev/verify-email");
+        ReflectionTestUtils.setField(sender, "fromAddress", "noreply@bidmart.dev");
+
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("buyer@test.com")
+                .build();
+
+        org.mockito.Mockito.doThrow(new org.springframework.mail.MailSendException("SMTP connection failed"))
+                .when(mailSender).send(org.mockito.ArgumentMatchers.any(SimpleMailMessage.class));
+
+        // Should NOT throw — exception is caught internally
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                () -> sender.sendVerificationEmail(user, "raw-token-123")
+        );
+    }
 }

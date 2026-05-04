@@ -472,6 +472,27 @@ class AuthServiceTest {
     }
 
     @Test
+    void updatePasswordShouldEncodeAndPersistWhenUserExists() {
+        String email = "password@test.com";
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email(email)
+                .password("encoded-old")
+                .build();
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("NewStrong1!")).thenReturn("encoded-new");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<User> updated = authService.updatePassword(email, "NewStrong1!");
+
+        assertTrue(updated.isPresent());
+        assertEquals("encoded-new", updated.get().getPassword());
+        verify(passwordPolicy).validate("NewStrong1!");
+        verify(userRepository).save(user);
+    }
+
+    @Test
     void verifyEmailShouldMarkUserVerifiedWhenTokenValid() {
         String token = "raw-verification-token";
         String tokenHash = sha256Hex(token);
@@ -663,6 +684,45 @@ class AuthServiceTest {
         assertEquals("google-sub", result.getOauthSubject());
         assertTrue(result.isEmailVerified());
         assertEquals("New Name", result.getDisplayName());
+    }
+
+    @Test
+    void linkOAuthShouldLinkExistingUserWhenEmailMatches() {
+        String email = "link@test.com";
+        User existingUser = User.builder()
+                .email(email)
+                .build();
+        OAuthIdentity identity = new OAuthIdentity("google-sub", email, "Linked Name", "avatar");
+
+        when(oauthIdentityVerifier.supports("google")).thenReturn(true);
+        when(oauthIdentityVerifier.verify("token")).thenReturn(identity);
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(existingUser));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        User result = authService.linkOAuth(email, "google", "token");
+
+        assertEquals("google", result.getOauthProvider());
+        assertEquals("google-sub", result.getOauthSubject());
+        assertTrue(result.isEmailVerified());
+        assertEquals("Linked Name", result.getDisplayName());
+    }
+
+    @Test
+    void linkOAuthShouldThrowWhenEmailMismatch() {
+        String email = "link@test.com";
+        OAuthIdentity identity = new OAuthIdentity("google-sub", "other@test.com", "Name", "avatar");
+
+        when(oauthIdentityVerifier.supports("google")).thenReturn(true);
+        when(oauthIdentityVerifier.verify("token")).thenReturn(identity);
+
+        InvalidOAuthTokenException exception = assertThrows(
+                InvalidOAuthTokenException.class,
+                () -> authService.linkOAuth(email, "google", "token")
+        );
+
+        assertEquals("Google account email does not match this user", exception.getMessage());
+        verify(userRepository, never()).findByEmail(anyString());
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test

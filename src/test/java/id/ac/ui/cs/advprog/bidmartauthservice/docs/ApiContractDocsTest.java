@@ -22,6 +22,7 @@ class ApiContractDocsTest {
         assertTrue(content.contains("/api/v1/auth/refresh"));
         assertTrue(content.contains("/api/v1/auth/profile"));
         assertTrue(content.contains("/api/v1/auth/oauth/login"));
+        assertTrue(content.contains("/api/v1/auth/oauth/link"));
         assertTrue(content.contains("/api/v1/auth/permissions/check"));
     }
 }

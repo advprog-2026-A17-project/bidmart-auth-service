@@ -10,6 +10,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.RefreshTokenRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RoleResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.SetPasswordRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.SessionResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorEmailRequest;
@@ -27,6 +28,8 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 import java.util.List;
 import java.util.Optional;
@@ -127,6 +130,24 @@ public class AuthController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PostMapping("/password")
+    public ResponseEntity<Void> updatePassword(
+            @Valid @RequestBody SetPasswordRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        String authenticatedEmail = (String) httpRequest.getAttribute("userEmail");
+        if (authenticatedEmail == null || authenticatedEmail.isBlank()) {
+            return ResponseEntity.status(401).build();
+        }
+        if (!authenticatedEmail.equalsIgnoreCase(request.email())) {
+            return ResponseEntity.status(403).build();
+        }
+
+        return authService.updatePassword(authenticatedEmail, request.password())
+                .map(user -> ResponseEntity.noContent().<Void>build())
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/verify-email")
     public ResponseEntity<String> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
         boolean verified = authService.verifyEmail(request.token());
@@ -166,6 +187,20 @@ public class AuthController {
                 request.idToken()
         );
         return ResponseEntity.ok(tokenService.issueTokens(user, userAgent));
+    }
+
+    @PostMapping("/oauth/link")
+    public ResponseEntity<Void> linkOAuth(
+        @Valid @RequestBody OAuthLoginRequest request,
+        HttpServletRequest httpRequest
+    ) {
+        String authenticatedEmail = (String) httpRequest.getAttribute("userEmail");
+        if (authenticatedEmail == null || authenticatedEmail.isBlank()) {
+            return ResponseEntity.status(401).build();
+        }
+
+        authService.linkOAuth(authenticatedEmail, request.provider(), request.idToken());
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/permissions/check")

@@ -13,6 +13,7 @@ public record UserProfileResponse(
         String displayName,
         String avatarUrl,
         String shippingAddress,
+        String oauthProvider,
         Set<AuthUserResponse.RoleSummary> roles
 ) {
     public static UserProfileResponse fromUser(User user) {
@@ -28,6 +29,7 @@ public record UserProfileResponse(
                 user.getDisplayName(),
                 user.getAvatarUrl(),
                 user.getShippingAddress(),
+                user.getOauthProvider(),
                 roleSummaries
         );
     }
