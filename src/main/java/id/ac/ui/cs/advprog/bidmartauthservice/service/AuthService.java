@@ -22,6 +22,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProvider
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -35,6 +36,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -369,7 +371,13 @@ public class AuthService {
                 .build();
 
         emailVerificationTokenRepository.save(token);
-        verificationEmailSender.sendVerificationEmail(user, rawToken);
+
+        try {
+            verificationEmailSender.sendVerificationEmail(user, rawToken);
+        } catch (Exception e) {
+            // Email sending is best-effort; user can request resend later
+            log.warn("Could not dispatch verification email for {}: {}", user.getEmail(), e.getMessage());
+        }
     }
 
     private boolean isWithinCooldownWindow(User user, Instant now) {
