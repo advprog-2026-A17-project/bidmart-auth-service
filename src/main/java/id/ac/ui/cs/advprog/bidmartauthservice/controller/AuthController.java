@@ -29,6 +29,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.Map;
@@ -129,8 +131,19 @@ public class AuthController {
     }
 
     @PostMapping("/password")
-    public ResponseEntity<Void> updatePassword(@Valid @RequestBody SetPasswordRequest request) {
-        return authService.updatePassword(request.email(), request.password())
+    public ResponseEntity<Void> updatePassword(
+            @Valid @RequestBody SetPasswordRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        String authenticatedEmail = (String) httpRequest.getAttribute("userEmail");
+        if (authenticatedEmail == null || authenticatedEmail.isBlank()) {
+            return ResponseEntity.status(401).build();
+        }
+        if (!authenticatedEmail.equalsIgnoreCase(request.email())) {
+            return ResponseEntity.status(403).build();
+        }
+
+        return authService.updatePassword(authenticatedEmail, request.password())
                 .map(user -> ResponseEntity.noContent().<Void>build())
                 .orElse(ResponseEntity.notFound().build());
     }
