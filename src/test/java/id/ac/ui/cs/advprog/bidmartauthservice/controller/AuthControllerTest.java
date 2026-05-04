@@ -434,6 +434,22 @@ class AuthControllerTest {
     }
 
     @Test
+    void updatePasswordShouldReturnNoContentWhenUserExists() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("password@test.com");
+        user.setPassword("encoded-pass");
+
+        when(authService.updatePassword("password@test.com", "NewStrong1!"))
+                .thenReturn(Optional.of(user));
+
+        mockMvc.perform(post("/api/v1/auth/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"password@test.com\",\"password\":\"NewStrong1!\"}"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
     void verifyEmailShouldReturnOkWhenTokenValid() throws Exception {
         when(authService.verifyEmail("valid-token")).thenReturn(true);
         VerifyEmailRequest request = new VerifyEmailRequest("valid-token");

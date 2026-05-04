@@ -472,6 +472,27 @@ class AuthServiceTest {
     }
 
     @Test
+    void updatePasswordShouldEncodeAndPersistWhenUserExists() {
+        String email = "password@test.com";
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email(email)
+                .password("encoded-old")
+                .build();
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("NewStrong1!")).thenReturn("encoded-new");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<User> updated = authService.updatePassword(email, "NewStrong1!");
+
+        assertTrue(updated.isPresent());
+        assertEquals("encoded-new", updated.get().getPassword());
+        verify(passwordPolicy).validate("NewStrong1!");
+        verify(userRepository).save(user);
+    }
+
+    @Test
     void verifyEmailShouldMarkUserVerifiedWhenTokenValid() {
         String token = "raw-verification-token";
         String tokenHash = sha256Hex(token);
