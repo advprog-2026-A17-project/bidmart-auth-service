@@ -444,9 +444,27 @@ class AuthControllerTest {
                 .thenReturn(Optional.of(user));
 
         mockMvc.perform(post("/api/v1/auth/password")
+                        .requestAttr("userEmail", "password@test.com")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"password@test.com\",\"password\":\"NewStrong1!\"}"))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void updatePasswordShouldReturnUnauthorizedWhenNotAuthenticated() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"password@test.com\",\"password\":\"NewStrong1!\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void updatePasswordShouldReturnForbiddenWhenEmailMismatch() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/password")
+                        .requestAttr("userEmail", "other@test.com")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"password@test.com\",\"password\":\"NewStrong1!\"}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test
