@@ -43,6 +43,9 @@ Base path: `/api/v1/auth`
 - `POST /api/v1/auth/oauth/login`  
   Google SSO login and token issuance (`provider=google`, `idToken=<google-id-token>`).
 
+- `POST /api/v1/auth/oauth/link`  
+  Link a Google account to the authenticated user (`provider=google`, `idToken=<google-id-token>`).
+
 - `GET /api/v1/auth/permissions/check`  
   Check if a user has a permission key.
 

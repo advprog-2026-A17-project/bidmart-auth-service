@@ -563,6 +563,44 @@ class AuthControllerTest {
     }
 
     @Test
+    void oauthLinkShouldReturnNoContentWhenAuthenticated() throws Exception {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("link@test.com")
+                .enabled(true)
+                .build();
+
+        when(authService.linkOAuth("link@test.com", "google", "google-id-token"))
+                .thenReturn(user);
+
+        OAuthLoginRequest request = new OAuthLoginRequest(
+                "google",
+                "google-id-token"
+        );
+
+        mockMvc.perform(post("/api/v1/auth/oauth/link")
+                        .requestAttr("userEmail", "link@test.com")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void oauthLinkShouldReturnUnauthorizedWhenNotAuthenticated() throws Exception {
+        OAuthLoginRequest request = new OAuthLoginRequest(
+                "google",
+                "google-id-token"
+        );
+
+        mockMvc.perform(post("/api/v1/auth/oauth/link")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isUnauthorized());
+
+        verify(authService, never()).linkOAuth(anyString(), anyString(), anyString());
+    }
+
+    @Test
     void oauthLoginShouldReturnBadRequestWhenProviderUnsupported() throws Exception {
         when(authService.oauthLogin("github", "provider-token"))
                 .thenThrow(new UnsupportedOAuthProviderException("Unsupported OAuth provider"));

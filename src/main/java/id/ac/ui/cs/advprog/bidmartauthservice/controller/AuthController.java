@@ -189,6 +189,20 @@ public class AuthController {
         return ResponseEntity.ok(tokenService.issueTokens(user, userAgent));
     }
 
+    @PostMapping("/oauth/link")
+    public ResponseEntity<Void> linkOAuth(
+        @Valid @RequestBody OAuthLoginRequest request,
+        HttpServletRequest httpRequest
+    ) {
+        String authenticatedEmail = (String) httpRequest.getAttribute("userEmail");
+        if (authenticatedEmail == null || authenticatedEmail.isBlank()) {
+            return ResponseEntity.status(401).build();
+        }
+
+        authService.linkOAuth(authenticatedEmail, request.provider(), request.idToken());
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/permissions/check")
     public ResponseEntity<Map<String, Boolean>> checkPermission(
             @RequestParam String email,

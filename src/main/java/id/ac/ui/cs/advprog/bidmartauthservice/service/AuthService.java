@@ -231,6 +231,23 @@ public class AuthService {
         return userRepository.save(user);
     }
 
+    @Transactional
+    public User linkOAuth(String email, String provider, String idToken) {
+        if (!oauthIdentityVerifier.supports(provider)) {
+            throw new UnsupportedOAuthProviderException("Unsupported OAuth provider");
+        }
+
+        OAuthIdentity identity = oauthIdentityVerifier.verify(idToken);
+        if (!email.equalsIgnoreCase(identity.email())) {
+            throw new InvalidOAuthTokenException("Google account email does not match this user");
+        }
+
+        User existingUser = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException("User with email " + email + " is not registered"));
+
+        return updateExistingOAuthUser(existingUser, provider, identity);
+    }
+
     private User updateExistingOAuthUser(User existingUser, String provider, OAuthIdentity identity) {
         boolean oauthAlreadyLinked = !isBlank(existingUser.getOauthProvider())
                 || !isBlank(existingUser.getOauthSubject());
