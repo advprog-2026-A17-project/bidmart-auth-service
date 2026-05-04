@@ -10,6 +10,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.dto.RefreshTokenRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RegisterRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.ResendVerificationRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.RoleResponse;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.SetPasswordRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.SessionResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TokenResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.TwoFactorEmailRequest;
@@ -124,6 +125,13 @@ public class AuthController {
                         request.shippingAddress())
                 .map(UserProfileResponse::fromUser)
                 .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/password")
+    public ResponseEntity<Void> updatePassword(@Valid @RequestBody SetPasswordRequest request) {
+        return authService.updatePassword(request.email(), request.password())
+                .map(user -> ResponseEntity.noContent().<Void>build())
                 .orElse(ResponseEntity.notFound().build());
     }
 

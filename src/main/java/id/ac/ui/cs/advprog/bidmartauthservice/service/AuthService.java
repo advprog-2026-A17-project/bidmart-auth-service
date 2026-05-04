@@ -128,6 +128,18 @@ public class AuthService {
         });
     }
 
+    @Transactional
+    public Optional<User> updatePassword(String email, String password) {
+        Optional<User> user = userRepository.findByEmail(email);
+        if (user.isEmpty()) {
+            return Optional.empty();
+        }
+        passwordPolicy.validate(password);
+        User existingUser = user.get();
+        existingUser.setPassword(passwordEncoder.encode(password));
+        return Optional.of(userRepository.save(existingUser));
+    }
+
     public boolean verifyEmail(String token) {
         Instant now = Instant.now();
         String tokenHash = verificationTokenCodec.hashToken(token);
