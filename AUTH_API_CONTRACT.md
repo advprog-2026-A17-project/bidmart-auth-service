@@ -25,6 +25,9 @@ Base path: `/api/v1/auth`
 - `PUT /api/v1/auth/profile`  
   Update profile fields (displayName, avatarUrl, shippingAddress).
 
+- `POST /api/v1/auth/password`
+  Set or update password for an account (used for OAuth-only users).
+
 - `POST /api/v1/auth/verify-email`  
   Verify account email using one-time opaque verification token.
 
