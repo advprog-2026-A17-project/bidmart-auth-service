@@ -40,4 +40,14 @@ class MigrationSchemaTest {
         assertTrue(v11.contains("idx_auth_outbox_status_next_attempt"),
                 "V11 should index status + next_attempt_at for publisher polling");
     }
+
+    @Test
+    void migrationsShouldGrantSellerAuctionClosePermission() throws IOException {
+        String migration = Files.readString(Path.of("src/main/resources/db/migration/V17__seed_seller_auction_close_permission.sql"));
+
+        assertTrue(migration.contains("auction:close"),
+                "V17 should seed auction:close permission");
+        assertTrue(migration.contains("00000000-0000-0000-0000-000000000002"),
+                "V17 should assign auction:close to SELLER role");
+    }
 }
