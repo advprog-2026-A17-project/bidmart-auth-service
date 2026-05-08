@@ -434,6 +434,40 @@ class AuthControllerTest {
     }
 
     @Test
+    void updatePasswordShouldReturnNoContentWhenUserExists() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("password@test.com");
+        user.setPassword("encoded-pass");
+
+        when(authService.updatePassword("password@test.com", "NewStrong1!"))
+                .thenReturn(Optional.of(user));
+
+        mockMvc.perform(post("/api/v1/auth/password")
+                        .requestAttr("userEmail", "password@test.com")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"password@test.com\",\"password\":\"NewStrong1!\"}"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void updatePasswordShouldReturnUnauthorizedWhenNotAuthenticated() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"password@test.com\",\"password\":\"NewStrong1!\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void updatePasswordShouldReturnForbiddenWhenEmailMismatch() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/password")
+                        .requestAttr("userEmail", "other@test.com")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"password@test.com\",\"password\":\"NewStrong1!\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void verifyEmailShouldReturnOkWhenTokenValid() throws Exception {
         when(authService.verifyEmail("valid-token")).thenReturn(true);
         VerifyEmailRequest request = new VerifyEmailRequest("valid-token");
@@ -526,6 +560,44 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").value("oauth-access-token"))
                 .andExpect(jsonPath("$.refreshToken").value("oauth-refresh-token"));
+    }
+
+    @Test
+    void oauthLinkShouldReturnNoContentWhenAuthenticated() throws Exception {
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email("link@test.com")
+                .enabled(true)
+                .build();
+
+        when(authService.linkOAuth("link@test.com", "google", "google-id-token"))
+                .thenReturn(user);
+
+        OAuthLoginRequest request = new OAuthLoginRequest(
+                "google",
+                "google-id-token"
+        );
+
+        mockMvc.perform(post("/api/v1/auth/oauth/link")
+                        .requestAttr("userEmail", "link@test.com")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void oauthLinkShouldReturnUnauthorizedWhenNotAuthenticated() throws Exception {
+        OAuthLoginRequest request = new OAuthLoginRequest(
+                "google",
+                "google-id-token"
+        );
+
+        mockMvc.perform(post("/api/v1/auth/oauth/link")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isUnauthorized());
+
+        verify(authService, never()).linkOAuth(anyString(), anyString(), anyString());
     }
 
     @Test

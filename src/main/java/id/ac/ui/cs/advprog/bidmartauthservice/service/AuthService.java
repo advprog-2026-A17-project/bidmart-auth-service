@@ -22,6 +22,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProvider
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.UserNotFoundException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -35,6 +36,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -128,6 +130,18 @@ public class AuthService {
         });
     }
 
+    @Transactional
+    public Optional<User> updatePassword(String email, String password) {
+        Optional<User> user = userRepository.findByEmail(email);
+        if (user.isEmpty()) {
+            return Optional.empty();
+        }
+        passwordPolicy.validate(password);
+        User existingUser = user.get();
+        existingUser.setPassword(passwordEncoder.encode(password));
+        return Optional.of(userRepository.save(existingUser));
+    }
+
     public boolean verifyEmail(String token) {
         Instant now = Instant.now();
         String tokenHash = verificationTokenCodec.hashToken(token);
@@ -215,6 +229,23 @@ public class AuthService {
                 .build();
 
         return userRepository.save(user);
+    }
+
+    @Transactional
+    public User linkOAuth(String email, String provider, String idToken) {
+        if (!oauthIdentityVerifier.supports(provider)) {
+            throw new UnsupportedOAuthProviderException("Unsupported OAuth provider");
+        }
+
+        OAuthIdentity identity = oauthIdentityVerifier.verify(idToken);
+        if (!email.equalsIgnoreCase(identity.email())) {
+            throw new InvalidOAuthTokenException("Google account email does not match this user");
+        }
+
+        User existingUser = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException("User with email " + email + " is not registered"));
+
+        return updateExistingOAuthUser(existingUser, provider, identity);
     }
 
     private User updateExistingOAuthUser(User existingUser, String provider, OAuthIdentity identity) {
@@ -357,7 +388,13 @@ public class AuthService {
                 .build();
 
         emailVerificationTokenRepository.save(token);
-        verificationEmailSender.sendVerificationEmail(user, rawToken);
+
+        try {
+            verificationEmailSender.sendVerificationEmail(user, rawToken);
+        } catch (Exception e) {
+            // Email sending is best-effort; user can request resend later
+            log.warn("Could not dispatch verification email for {}: {}", user.getEmail(), e.getMessage());
+        }
     }
 
     private boolean isWithinCooldownWindow(User user, Instant now) {

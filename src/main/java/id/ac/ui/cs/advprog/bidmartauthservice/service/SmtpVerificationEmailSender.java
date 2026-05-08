@@ -2,10 +2,13 @@ package id.ac.ui.cs.advprog.bidmartauthservice.service;
 
 import id.ac.ui.cs.advprog.bidmartauthservice.model.User;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -13,6 +16,8 @@ import org.springframework.web.util.UriComponentsBuilder;
 @Profile("!local")
 @RequiredArgsConstructor
 public class SmtpVerificationEmailSender implements VerificationEmailSender {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(SmtpVerificationEmailSender.class);
 
     private final JavaMailSender mailSender;
 
@@ -22,6 +27,7 @@ public class SmtpVerificationEmailSender implements VerificationEmailSender {
     @Value("${app.auth.email-verification.from:no-reply@bidmart.local}")
     private String fromAddress;
 
+    @Async
     @Override
     public void sendVerificationEmail(User user, String rawToken) {
         String verificationLink = UriComponentsBuilder
@@ -41,6 +47,11 @@ public class SmtpVerificationEmailSender implements VerificationEmailSender {
                 "If you did not create this account, you can ignore this message."
         );
 
-        mailSender.send(message);
+        try {
+            mailSender.send(message);
+            LOGGER.info("Verification email sent to {}", user.getEmail());
+        } catch (Exception e) {
+            LOGGER.error("Failed to send verification email to {}: {}", user.getEmail(), e.getMessage(), e);
+        }
     }
 }

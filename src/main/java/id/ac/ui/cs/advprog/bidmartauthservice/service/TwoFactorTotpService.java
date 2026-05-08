@@ -1,5 +1,8 @@
 package id.ac.ui.cs.advprog.bidmartauthservice.service;
 
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidTwoFactorChallengeException;
+import id.ac.ui.cs.advprog.bidmartauthservice.model.TwoFactorChallenge;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.TwoFactorChallengeRepository;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
@@ -17,6 +20,26 @@ public class TwoFactorTotpService {
     private static final String TOTP_ISSUER = "BidMart";
     private static final String BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    private final TwoFactorChallengeRepository challengeRepository;
+
+    public TwoFactorTotpService(TwoFactorChallengeRepository challengeRepository) {
+        this.challengeRepository = challengeRepository;
+    }
+
+    public void verifySetupChallenge(String challengeId, String code) {
+        TwoFactorChallenge challenge = challengeRepository.findById(java.util.UUID.fromString(challengeId))
+                .orElseThrow(() -> new InvalidTwoFactorChallengeException("Challenge not found or already completed."));
+
+        if (Instant.now().isAfter(challenge.getExpiresAt())) {
+            challengeRepository.delete(challenge);
+            throw new InvalidTwoFactorChallengeException("Setup session expired. Please click 'Set Up 2FA' to generate a new QR code.");
+        }
+
+        if (!isCodeValid(challenge.getSecret(), code)) {
+            throw new InvalidTwoFactorChallengeException("Invalid 2FA code.");
+        }
+    }
 
     public String generateSecret() {
         byte[] randomBytes = new byte[20];

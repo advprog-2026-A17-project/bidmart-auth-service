@@ -9,6 +9,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.UserRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.EmailVerificationTokenRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.repository.PermissionRepository;
+import id.ac.ui.cs.advprog.bidmartauthservice.repository.TwoFactorChallengeRepository;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailNotVerifiedException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
@@ -91,7 +92,7 @@ class AuthServiceTest {
     private AuthAuditOutboxService authAuditOutboxService;
 
     @Spy
-    private TwoFactorTotpService twoFactorTotpService = new TwoFactorTotpService();
+    private TwoFactorTotpService twoFactorTotpService = new TwoFactorTotpService(mock(TwoFactorChallengeRepository.class));
 
     @InjectMocks
     private AuthService authService;
@@ -471,6 +472,27 @@ class AuthServiceTest {
     }
 
     @Test
+    void updatePasswordShouldEncodeAndPersistWhenUserExists() {
+        String email = "password@test.com";
+        User user = User.builder()
+                .id(UUID.randomUUID())
+                .email(email)
+                .password("encoded-old")
+                .build();
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("NewStrong1!")).thenReturn("encoded-new");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Optional<User> updated = authService.updatePassword(email, "NewStrong1!");
+
+        assertTrue(updated.isPresent());
+        assertEquals("encoded-new", updated.get().getPassword());
+        verify(passwordPolicy).validate("NewStrong1!");
+        verify(userRepository).save(user);
+    }
+
+    @Test
     void verifyEmailShouldMarkUserVerifiedWhenTokenValid() {
         String token = "raw-verification-token";
         String tokenHash = sha256Hex(token);
@@ -646,7 +668,7 @@ class AuthServiceTest {
         String email = "existing@test.com";
         User existingUser = User.builder()
                 .email(email)
-                .oauthProvider(null) // Not linked yet
+                .oauthProvider(null)
                 .oauthSubject(null)
                 .build();
         OAuthIdentity identity = new OAuthIdentity("google-sub", email, "New Name", "new-avatar");
@@ -662,6 +684,45 @@ class AuthServiceTest {
         assertEquals("google-sub", result.getOauthSubject());
         assertTrue(result.isEmailVerified());
         assertEquals("New Name", result.getDisplayName());
+    }
+
+    @Test
+    void linkOAuthShouldLinkExistingUserWhenEmailMatches() {
+        String email = "link@test.com";
+        User existingUser = User.builder()
+                .email(email)
+                .build();
+        OAuthIdentity identity = new OAuthIdentity("google-sub", email, "Linked Name", "avatar");
+
+        when(oauthIdentityVerifier.supports("google")).thenReturn(true);
+        when(oauthIdentityVerifier.verify("token")).thenReturn(identity);
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(existingUser));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        User result = authService.linkOAuth(email, "google", "token");
+
+        assertEquals("google", result.getOauthProvider());
+        assertEquals("google-sub", result.getOauthSubject());
+        assertTrue(result.isEmailVerified());
+        assertEquals("Linked Name", result.getDisplayName());
+    }
+
+    @Test
+    void linkOAuthShouldThrowWhenEmailMismatch() {
+        String email = "link@test.com";
+        OAuthIdentity identity = new OAuthIdentity("google-sub", "other@test.com", "Name", "avatar");
+
+        when(oauthIdentityVerifier.supports("google")).thenReturn(true);
+        when(oauthIdentityVerifier.verify("token")).thenReturn(identity);
+
+        InvalidOAuthTokenException exception = assertThrows(
+                InvalidOAuthTokenException.class,
+                () -> authService.linkOAuth(email, "google", "token")
+        );
+
+        assertEquals("Google account email does not match this user", exception.getMessage());
+        verify(userRepository, never()).findByEmail(anyString());
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test
@@ -687,7 +748,7 @@ class AuthServiceTest {
         String hash = "hash";
         when(verificationTokenCodec.hashToken(token)).thenReturn(hash);
         EmailVerificationToken expiredToken = EmailVerificationToken.builder()
-                .expiresAt(Instant.now().minusSeconds(3600)) // 1 hour ago
+                .expiresAt(Instant.now().minusSeconds(3600))
                 .build();
 
         when(emailVerificationTokenRepository.findByTokenHashAndUsedAtIsNull(hash))
@@ -718,7 +779,7 @@ class AuthServiceTest {
 
     @Test
     void hasPermissionShouldHandleNullPermissionsSafely() {
-        Role roleWithNoPerms = Role.builder().permissions(null).build(); // Triggers empty stream lambda
+        Role roleWithNoPerms = Role.builder().permissions(null).build();
         User user = User.builder().roles(Set.of(roleWithNoPerms)).build();
 
         when(userRepository.findByEmail("test@test.com")).thenReturn(Optional.of(user));
@@ -741,7 +802,6 @@ class AuthServiceTest {
         User user = User.builder().twoFactorSecret("SECRET").build();
         when(userRepository.findByEmail("2fa@test.com")).thenReturn(Optional.of(user));
         
-        // Test valid and invalid
         assertTrue(authService.verifyTwoFactorCode("2fa@test.com", currentTotp("SECRET")));
         assertFalse(authService.verifyTwoFactorCode("2fa@test.com", "000000"));
     }
@@ -750,7 +810,7 @@ class AuthServiceTest {
     void resendVerificationShouldRespectCooldown() {
         User user = User.builder().emailVerified(false).build();
         EmailVerificationToken recentToken = EmailVerificationToken.builder()
-                .lastSentAt(Instant.now().minusSeconds(10)) // Only 10s ago, cooldown is 60s
+                .lastSentAt(Instant.now().minusSeconds(10))
                 .build();
 
         when(userRepository.findByEmail("test@test.com")).thenReturn(Optional.of(user));

@@ -22,8 +22,11 @@ public class TwoFactorChallenge {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "token_hash", nullable = false, unique = true)
+    @Column(name = "token_hash", unique = true)
     private String tokenHash;
+
+    @Column(name = "secret")
+    private String secret;
 
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;

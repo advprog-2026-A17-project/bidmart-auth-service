@@ -9,9 +9,11 @@ public record UserProfileResponse(
         UUID id,
         String email,
         boolean enabled,
+        boolean twoFactorEnabled,
         String displayName,
         String avatarUrl,
         String shippingAddress,
+        String oauthProvider,
         Set<AuthUserResponse.RoleSummary> roles
 ) {
     public static UserProfileResponse fromUser(User user) {
@@ -23,9 +25,11 @@ public record UserProfileResponse(
                 user.getId(),
                 user.getEmail(),
                 user.isEnabled(),
+                user.isTwoFactorEnabled(),
                 user.getDisplayName(),
                 user.getAvatarUrl(),
                 user.getShippingAddress(),
+                user.getOauthProvider(),
                 roleSummaries
         );
     }
