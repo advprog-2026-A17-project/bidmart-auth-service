@@ -37,6 +37,9 @@ Base path: `/api/v1/auth`
 - `GET /api/v1/auth/sessions`  
   List active refresh-token sessions for an account.
 
+- `GET /api/v1/auth/diagnostics/policies`  
+  Admin-only diagnostics for configured auth policy values.
+
 - `POST /api/v1/auth/admin/disable-user`  
   Disable user and revoke all active sessions.
 
@@ -54,6 +57,14 @@ Base path: `/api/v1/auth`
 - Access token: JWT (`Bearer`) with user identity and role claims.
 - Refresh token: JWT with rotation on refresh.
 - Revocation: refresh token/session revocation on logout and admin disable.
+- Concurrent session limit is configured through `AUTH_MAX_CONCURRENT_SESSIONS`.
+
+## Runtime Policy Configuration
+
+- `AUTH_MAX_CONCURRENT_SESSIONS`: maximum active refresh-token sessions before the oldest session is revoked.
+- `AUTH_RATE_LIMIT_MAX_ATTEMPTS`: login, refresh, and 2FA rate-limit attempts per window.
+- `AUTH_RATE_LIMIT_WINDOW_SECONDS`: rate-limit window size.
+- `GET /api/v1/auth/diagnostics/policies` returns the active values for deployment verification.
 
 ## Email Verification Contract
 
