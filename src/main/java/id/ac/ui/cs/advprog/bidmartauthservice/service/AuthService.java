@@ -18,6 +18,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.service.security.AuthAuditOutboxSe
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.EmailAlreadyRegisteredException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidOAuthTokenException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.RoleNotFoundException;
+import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnauthorizedRoleRegistrationException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.UnsupportedOAuthProviderException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.InvalidCredentialsException;
 import id.ac.ui.cs.advprog.bidmartauthservice.exception.UserNotFoundException;
@@ -66,14 +67,20 @@ public class AuthService {
     public User register(String email, String password, String roleName) {
         passwordPolicy.validate(password);
 
-        // cek apakah email sudah ada
-        if (userRepository.findByEmail(email).isPresent()) {
-            throw new EmailAlreadyRegisteredException("Email already registered");
+        // prevent registering as an admin via the public endpoint
+        if ("ADMIN".equalsIgnoreCase(roleName)) {
+            throw new UnauthorizedRoleRegistrationException("Forbidden Role Assignment");
         }
 
         // cari role
-        Role role = roleRepository.findByName(roleName)
+        String normalizedRoleName = roleName.trim().toUpperCase(Locale.ROOT);
+        Role role = roleRepository.findByName(normalizedRoleName)
                 .orElseThrow(() -> new RoleNotFoundException("Role not found"));
+
+        Optional<User> existingUser = userRepository.findByEmail(email);
+        if (existingUser.isPresent()) {
+            return registerAdditionalAccountRole(existingUser.get(), password, role);
+        }
 
         // buat user
         User user = User.builder()
@@ -89,6 +96,27 @@ public class AuthService {
         issueVerificationToken(savedUser, Instant.now(), false);
         walletProvisioningOutboxService.enqueueWalletProvisionRequested(savedUser);
         authEventPublisher.publishUserRegistered(savedUser);
+        return savedUser;
+    }
+
+    private User registerAdditionalAccountRole(User existingUser, String password, Role role) {
+        if (!passwordEncoder.matches(password, existingUser.getPassword())) {
+            throw new EmailAlreadyRegisteredException("Email already registered. Enter the existing account password to add another account mode.");
+        }
+
+        Set<Role> roles = existingUser.getRoles() == null
+                ? new LinkedHashSet<>()
+                : new LinkedHashSet<>(existingUser.getRoles());
+        boolean alreadyRegistered = roles.stream()
+                .anyMatch(existingRole -> existingRole.getName().equalsIgnoreCase(role.getName()));
+        if (alreadyRegistered) {
+            throw new EmailAlreadyRegisteredException("This email already has a " + role.getName() + " account.");
+        }
+
+        roles.add(role);
+        existingUser.setRoles(roles);
+        User savedUser = userRepository.save(existingUser);
+        authAuditOutboxService.enqueueUserRoleChanged(savedUser, role);
         return savedUser;
     }
 

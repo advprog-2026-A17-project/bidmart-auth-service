@@ -92,4 +92,12 @@ public class GlobalExceptionHandler {
         body.put("error", "EMAIL_NOT_VERIFIED");
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
     }
+
+    @ExceptionHandler(UnauthorizedRoleRegistrationException.class)
+    public ResponseEntity<Map<String, String>> handleUnauthorizedRoleRegistration(UnauthorizedRoleRegistrationException e) {
+        Map<String, String> body = new HashMap<>();
+        body.put("message", e.getMessage());
+        body.put("error", "UNAUTHORIZED_ROLE_REGISTRATION");
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+    }
 }

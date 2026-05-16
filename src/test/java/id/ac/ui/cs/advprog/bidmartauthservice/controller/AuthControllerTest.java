@@ -515,6 +515,18 @@ class AuthControllerTest {
     }
 
     @Test
+    void policyDiagnosticsShouldReturnConfiguredAuthPoliciesForAdmin() throws Exception {
+        when(authService.hasPermission("admin@test.com", "admin:*")).thenReturn(true);
+
+        mockMvc.perform(get("/api/v1/auth/diagnostics/policies")
+                        .requestAttr("userEmail", "admin@test.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.concurrentSessionLimit").value(5))
+                .andExpect(jsonPath("$.rateLimitMaxAttempts").value(5))
+                .andExpect(jsonPath("$.rateLimitWindowSeconds").value(60));
+    }
+
+    @Test
     void disableUserShouldReturnNoContentWhenUserDisabled() throws Exception {
         when(authService.disableUser("buyer@test.com")).thenReturn(Optional.of(new User()));
         when(authService.hasPermission("admin@test.com", "admin:*")).thenReturn(true);

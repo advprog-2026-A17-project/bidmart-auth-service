@@ -2,6 +2,7 @@ package id.ac.ui.cs.advprog.bidmartauthservice.controller;
 
 import id.ac.ui.cs.advprog.bidmartauthservice.annotation.RequirePermission;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.AssignRoleRequest;
+import id.ac.ui.cs.advprog.bidmartauthservice.dto.AuthPolicyDiagnosticsResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.AuthUserResponse;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.CreateRoleRequest;
 import id.ac.ui.cs.advprog.bidmartauthservice.dto.LoginRequest;
@@ -26,6 +27,7 @@ import id.ac.ui.cs.advprog.bidmartauthservice.service.TokenService;
 import id.ac.ui.cs.advprog.bidmartauthservice.service.ratelimit.AuthRateLimiter;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -46,6 +48,15 @@ public class AuthController {
     private final AuthService authService;
     private final TokenService tokenService;
     private final AuthRateLimiter authRateLimiter;
+
+    @Value("${app.auth.sessions.max-concurrent:5}")
+    private int concurrentSessionLimit;
+
+    @Value("${app.auth.rate-limit.max-attempts:5}")
+    private int rateLimitMaxAttempts;
+
+    @Value("${app.auth.rate-limit.window-seconds:60}")
+    private long rateLimitWindowSeconds;
 
     @PostMapping("/register")
     public ResponseEntity<AuthUserResponse> register(@Valid @RequestBody RegisterRequest request) {
@@ -166,6 +177,16 @@ public class AuthController {
     @GetMapping("/sessions")
     public ResponseEntity<List<SessionResponse>> getActiveSessions(@RequestParam String email) {
         return ResponseEntity.ok(tokenService.listActiveSessions(email));
+    }
+
+    @GetMapping("/diagnostics/policies")
+    @RequirePermission("admin:users")
+    public ResponseEntity<AuthPolicyDiagnosticsResponse> getPolicyDiagnostics() {
+        return ResponseEntity.ok(new AuthPolicyDiagnosticsResponse(
+                concurrentSessionLimit,
+                rateLimitMaxAttempts,
+                rateLimitWindowSeconds
+        ));
     }
 
     @PostMapping("/admin/disable-user")

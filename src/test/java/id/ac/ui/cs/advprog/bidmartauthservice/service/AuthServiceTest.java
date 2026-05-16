@@ -190,20 +190,54 @@ class AuthServiceTest {
     }
 
     @Test
-    void registerShouldThrowWhenEmailAlreadyRegistered() {
+    void registerShouldAddSecondAccountRoleWhenEmailAlreadyExistsAndPasswordMatches() {
         String email = "service@test.com";
-        User existingUser = User.builder().email(email).build();
+        Role buyerRole = Role.builder().id(UUID.randomUUID()).name("BUYER").build();
+        Role sellerRole = Role.builder().id(UUID.randomUUID()).name("SELLER").build();
+        User existingUser = User.builder()
+                .id(UUID.randomUUID())
+                .email(email)
+                .password("encoded-pass")
+                .roles(Set.of(buyerRole))
+                .build();
 
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(existingUser));
+        when(roleRepository.findByName("SELLER")).thenReturn(Optional.of(sellerRole));
+        when(passwordEncoder.matches("pass", "encoded-pass")).thenReturn(true);
+        when(userRepository.save(existingUser)).thenReturn(existingUser);
+
+        User saved = authService.register(email, "pass", "SELLER");
+
+        assertTrue(saved.getRoles().contains(buyerRole));
+        assertTrue(saved.getRoles().contains(sellerRole));
+        verify(userRepository).findByEmail(email);
+        verify(roleRepository).findByName("SELLER");
+        verify(passwordEncoder).matches("pass", "encoded-pass");
+        verify(userRepository).save(existingUser);
+        verify(authAuditOutboxService).enqueueUserRoleChanged(existingUser, sellerRole);
+        verify(walletProvisioningOutboxService, never()).enqueueWalletProvisionRequested(any(User.class));
+    }
+
+    @Test
+    void registerShouldRejectExistingEmailWhenPasswordDoesNotMatch() {
+        String email = "service@test.com";
+        Role sellerRole = Role.builder().id(UUID.randomUUID()).name("SELLER").build();
+        User existingUser = User.builder()
+                .email(email)
+                .password("encoded-pass")
+                .roles(Set.of(Role.builder().id(UUID.randomUUID()).name("BUYER").build()))
+                .build();
+
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(existingUser));
+        when(roleRepository.findByName("SELLER")).thenReturn(Optional.of(sellerRole));
+        when(passwordEncoder.matches("wrong", "encoded-pass")).thenReturn(false);
 
         RuntimeException exception = assertThrows(
                 RuntimeException.class,
-                () -> authService.register(email, "pass", "BUYER")
+                () -> authService.register(email, "wrong", "SELLER")
         );
 
-        assertEquals("Email already registered", exception.getMessage());
-        verify(userRepository).findByEmail(email);
-        verify(roleRepository, never()).findByName(anyString());
+        assertEquals("Email already registered. Enter the existing account password to add another account mode.", exception.getMessage());
         verify(userRepository, never()).save(any(User.class));
         verify(walletProvisioningOutboxService, never()).enqueueWalletProvisionRequested(any(User.class));
     }
