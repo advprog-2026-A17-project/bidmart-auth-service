@@ -144,6 +144,10 @@ public class AuthService {
         return userRepository.findByEmail(email);
     }
 
+    public Optional<User> getProfileById(UUID userId) {
+        return userRepository.findById(userId);
+    }
+
     public Optional<User> updateProfile(
             String email,
             String displayName,

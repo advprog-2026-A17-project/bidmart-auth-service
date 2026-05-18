@@ -129,6 +129,14 @@ public class AuthController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @GetMapping("/internal/users/{userId}/profile")
+    public ResponseEntity<UserProfileResponse> getProfileByUserId(@PathVariable UUID userId) {
+        return authService.getProfileById(userId)
+                .map(UserProfileResponse::fromUser)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PutMapping("/profile")
     public ResponseEntity<UserProfileResponse> updateProfile(@Valid @RequestBody UpdateProfileRequest request) {
         return authService.updateProfile(
